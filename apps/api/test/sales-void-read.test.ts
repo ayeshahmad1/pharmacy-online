@@ -13,6 +13,7 @@ import {
   sell,
   voidSale,
 } from './sales-fixtures';
+import { createReturn, rejectReturn, returnOf } from './returns-fixtures';
 
 beforeEach(resetDatabase);
 
@@ -146,24 +147,43 @@ describe('POST /api/sales/:id/void', () => {
 
   it('refuses once anything has been returned against the sale', async () => {
     const { pharmacist, b2, sale } = await soldAcrossTwoBatches();
-    // Returns arrive in a later session; insert one directly.
-    await prisma.return.create({
-      data: {
-        returnNumber: 'R-TEST-0001',
-        saleId: sale.id,
-        processedById: pharmacist.user.id,
-        reason: 'Allergic reaction',
-        refundTotal: '25.00',
-        refundMethod: 'CASH',
-        items: { create: { saleItemId: sale.items[1]!.id, quantity: 1, refundAmount: '25.00' } },
-      },
+    const ret = await createReturn(pharmacist.auth, {
+      saleId: sale.id,
+      items: [{ saleItemId: sale.items[1]!.id, quantity: 1 }],
     });
+    expect(ret.status).toBe(201);
 
     const res = await voidSale(pharmacist.auth, sale.id);
 
     expect(res.status).toBe(409);
     expect(res.body.error.message).toMatch(/use returns instead/);
+    expect(await ledgerQuantity(b2.id)).toBe(14);
+  });
+
+  it('refuses while a cashier’s return is waiting for approval', async () => {
+    const { pharmacist, cashier, b2, sale } = await soldAcrossTwoBatches();
+    const ret = await createReturn(cashier.auth, {
+      saleId: sale.id,
+      items: [{ saleItemId: sale.items[1]!.id, quantity: 1 }],
+    });
+    expect(ret.body.return.status).toBe('PENDING');
+
+    const res = await voidSale(pharmacist.auth, sale.id);
+
+    expect(res.status).toBe(409);
     expect(await ledgerQuantity(b2.id)).toBe(13);
+  });
+
+  it('is allowed again once the only return was rejected', async () => {
+    const { pharmacist, cashier, b2, sale } = await soldAcrossTwoBatches();
+    const ret = await createReturn(cashier.auth, {
+      saleId: sale.id,
+      items: [{ saleItemId: sale.items[1]!.id, quantity: 1 }],
+    });
+    await rejectReturn(pharmacist.auth, returnOf(ret).id);
+
+    expect((await voidSale(pharmacist.auth, sale.id)).status).toBe(200);
+    expect(await ledgerQuantity(b2.id)).toBe(20);
   });
 
   it('requires a reason', async () => {

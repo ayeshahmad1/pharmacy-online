@@ -28,6 +28,9 @@ export const AUDIT_ACTIONS = [
   'STOCK_EXPIRED_WRITEOFF',
   'SALE_CREATE',
   'SALE_VOID',
+  'RETURN_CREATE',
+  'RETURN_APPROVE',
+  'RETURN_REJECT',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

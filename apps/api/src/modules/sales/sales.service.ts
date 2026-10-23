@@ -5,6 +5,7 @@ import type {
   Paginated,
   RoleCode,
   SaleDto,
+  SaleItemDto,
   SaleSummaryDto,
   VoidSaleBody,
 } from '@pharmacy/shared';
@@ -23,6 +24,7 @@ import {
 } from '../../lib/errors';
 import { formatPaisa, toPaisa } from '../../lib/money';
 import { prisma } from '../../lib/prisma';
+import { nextDocumentNumber } from '../../lib/receipts';
 import { escapeLike } from '../../lib/search';
 import { batchQuantities, batchQuantitySql, lockBatches } from '../../lib/stock';
 import {
@@ -49,24 +51,43 @@ const SALE_TX = { maxWait: 10_000, timeout: 20_000 };
 // collide with advisory locks taken for anything else.
 const IDEMPOTENCY_LOCK_SPACE = 5_001;
 
-const userRef = { select: { id: true, username: true, fullName: true } } as const;
+export const userRef = { select: { id: true, username: true, fullName: true } } as const;
+
+/** What a sale line needs for its DTO; shared with returns. */
+export const saleItemInclude = {
+  batch: {
+    select: {
+      id: true,
+      batchNumber: true,
+      expiryDate: true,
+      medicine: { select: { id: true, name: true, genericName: true, unit: true } },
+    },
+  },
+} satisfies Prisma.SaleItemInclude;
+
+export type SaleItemRow = Prisma.SaleItemGetPayload<{ include: typeof saleItemInclude }>;
+
+export function toSaleItemDto(i: SaleItemRow): SaleItemDto {
+  return {
+    id: i.id,
+    medicine: i.batch.medicine,
+    batch: {
+      id: i.batch.id,
+      batchNumber: i.batch.batchNumber,
+      expiryDate: toDateOnly(i.batch.expiryDate),
+    },
+    quantity: i.quantity,
+    unitPrice: i.unitPrice.toFixed(2),
+    discount: i.discount.toFixed(2),
+    tax: i.tax.toFixed(2),
+    lineTotal: i.lineTotal.toFixed(2),
+  };
+}
 
 const saleInclude = {
   cashier: userRef,
   voidedBy: userRef,
-  items: {
-    include: {
-      batch: {
-        select: {
-          id: true,
-          batchNumber: true,
-          expiryDate: true,
-          medicine: { select: { id: true, name: true, genericName: true, unit: true } },
-        },
-      },
-    },
-    orderBy: { lineNo: 'asc' },
-  },
+  items: { include: saleItemInclude, orderBy: { lineNo: 'asc' } },
   // Rows of one sale share a timestamp, so list them in a fixed method order
   // (cash, card, wallet: the enum's order) for a stable receipt.
   payments: { orderBy: [{ method: 'asc' }, { id: 'asc' }] },
@@ -89,20 +110,7 @@ function toSaleDto(s: SaleRow): SaleDto {
     changeDue: s.changeDue.toFixed(2),
     amountTendered: formatPaisa(toPaisa(s.grandTotal) + toPaisa(s.changeDue)),
     notes: s.notes,
-    items: s.items.map((i) => ({
-      id: i.id,
-      medicine: i.batch.medicine,
-      batch: {
-        id: i.batch.id,
-        batchNumber: i.batch.batchNumber,
-        expiryDate: toDateOnly(i.batch.expiryDate),
-      },
-      quantity: i.quantity,
-      unitPrice: i.unitPrice.toFixed(2),
-      discount: i.discount.toFixed(2),
-      tax: i.tax.toFixed(2),
-      lineTotal: i.lineTotal.toFixed(2),
-    })),
+    items: s.items.map(toSaleItemDto),
     payments: s.payments.map((p) => ({
       id: p.id,
       method: p.method,
@@ -190,7 +198,7 @@ export async function createSale(input: CreateSaleBody, seller: Seller): Promise
     // Everything above is cheap validation; stock locks are taken only now,
     // and held until commit.
     const lines = await allocateStock(tx, input, priced.lines, medicines, today);
-    const receiptNumber = await nextReceiptNumber(tx, today);
+    const receiptNumber = await nextDocumentNumber(tx, 'S', today);
 
     const sale = await tx.sale.create({
       data: {
@@ -397,28 +405,13 @@ async function shortageError(
   return insufficientStock(message, { items });
 }
 
-/**
- * Next receipt number for the business day, e.g. S-20261023-0001. The upsert
- * locks the day's counter row until commit, so concurrent sales get distinct
- * numbers, and a sale that rolls back gives its number back.
- */
-async function nextReceiptNumber(tx: Prisma.TransactionClient, today: string): Promise<string> {
-  const [row] = await tx.$queryRaw<[{ lastNumber: number }]>`
-    INSERT INTO "ReceiptCounter" ("day", "lastNumber", "updatedAt")
-    VALUES (${today}::date, 1, now())
-    ON CONFLICT ("day") DO UPDATE
-      SET "lastNumber" = "ReceiptCounter"."lastNumber" + 1, "updatedAt" = now()
-    RETURNING "lastNumber"`;
-  return `S-${today.replace(/-/g, '')}-${String(row.lastNumber).padStart(4, '0')}`;
-}
-
 // ─── Void ───────────────────────────────────────────────────────────────────
 
 /**
  * Cancels a completed sale: every line's units go back to the batch they
  * came from as RETURN movements, and the sale is kept with status VOIDED
- * (CLAUDE.md rule 7). Once anything has been returned against the sale it
- * must be handled through returns instead.
+ * (CLAUDE.md rule 7). Once anything has been returned against the sale, or
+ * a return is waiting for approval, it must be handled through returns.
  */
 export async function voidSale(id: string, input: VoidSaleBody, actor: Actor): Promise<SaleDto> {
   await prisma.$transaction(async (tx) => {
@@ -431,7 +424,7 @@ export async function voidSale(id: string, input: VoidSaleBody, actor: Actor): P
       where: { id },
       include: {
         items: { orderBy: { lineNo: 'asc' } },
-        _count: { select: { returns: { where: { status: 'COMPLETED' } } } },
+        _count: { select: { returns: { where: { status: { in: ['PENDING', 'COMPLETED'] } } } } },
       },
     });
     if (sale.status === 'VOIDED') throw conflict(`Sale ${sale.receiptNumber} is already voided`);
@@ -442,7 +435,7 @@ export async function voidSale(id: string, input: VoidSaleBody, actor: Actor): P
     }
     if (sale._count.returns > 0) {
       throw conflict(
-        `Items from sale ${sale.receiptNumber} have been returned; use returns instead of voiding`,
+        `Items from sale ${sale.receiptNumber} have been returned or are awaiting return approval; use returns instead of voiding`,
       );
     }
 
