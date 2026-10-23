@@ -7,3 +7,4 @@ export * from './schemas/categories';
 export * from './schemas/suppliers';
 export * from './schemas/medicines';
 export * from './schemas/inventory';
+export * from './schemas/sales';

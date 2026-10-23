@@ -11,6 +11,7 @@ export const ERROR_CODES = [
   'NOT_FOUND',
   'CONFLICT',
   'INSUFFICIENT_STOCK',
+  'IDEMPOTENCY_KEY_REUSED',
   'INTERNAL_ERROR',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
