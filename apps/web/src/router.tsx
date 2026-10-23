@@ -2,6 +2,7 @@ import { createBrowserRouter } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
 import { LoginPage } from '@/features/auth/login-page';
 import { HomeRedirect, RequireAuth, RequireRole } from '@/features/auth/route-guards';
+import { BillingPage } from '@/features/billing/billing-page';
 import { CategoriesPage } from '@/features/categories/categories-page';
 import { InventoryPage } from '@/features/inventory/inventory-page';
 import { ReceiveStockPage } from '@/features/inventory/receive-stock-page';
@@ -25,7 +26,7 @@ export const router = createBrowserRouter([
           {
             element: <RequireRole roles={ALL_ROLES} />,
             children: [
-              { path: 'billing', element: <PlaceholderPage title="Billing" session={9} /> },
+              { path: 'billing', element: <BillingPage /> },
               { path: 'sales', element: <PlaceholderPage title="Sales" /> },
               { path: 'returns', element: <PlaceholderPage title="Returns" /> },
             ],

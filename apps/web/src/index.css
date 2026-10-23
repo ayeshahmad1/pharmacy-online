@@ -108,3 +108,38 @@
     @apply bg-background text-foreground antialiased;
   }
 }
+
+/*
+ * 80mm thermal receipts. A receipt mounted with <ReceiptPrintArea> is hidden
+ * on screen; while it is mounted, printing the page prints only the receipt.
+ * Set the printer's paper to the 80mm roll; the content is 72mm wide, the
+ * printable width of common 80mm printers.
+ */
+.receipt-print {
+  display: none;
+}
+
+@page receipt {
+  margin: 0;
+}
+
+@media print {
+  body:has(> .receipt-print) {
+    background: #fff;
+  }
+
+  body:has(> .receipt-print) > :not(.receipt-print) {
+    display: none !important;
+  }
+
+  .receipt-print {
+    display: block;
+    page: receipt;
+    width: 80mm;
+    padding: 2mm 4mm 6mm;
+    background: #fff;
+    color: #000;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
