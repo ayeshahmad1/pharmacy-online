@@ -92,8 +92,32 @@ model User {
   voidedReturns    Return[]        @relation("ReturnVoidedBy")
   stockMovements   StockMovement[]
   auditLogs        AuditLog[]
+  refreshTokens    RefreshToken[]
 
   @@index([roleId])
+}
+
+/// Server-side record of each issued refresh token, so tokens can be revoked
+/// (logout, deactivation, password reset). Tokens are rotated on every use;
+/// presenting an already-rotated token revokes its whole family.
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  user         User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  /// SHA-256 of the opaque token. The raw token only ever lives in the client's cookie.
+  tokenHash    String    @unique
+  /// Shared by every token rotated from the same login.
+  familyId     String    @db.Uuid
+  expiresAt    DateTime  @db.Timestamptz(3)
+  revokedAt    DateTime? @db.Timestamptz(3)
+  /// Set when revoked by rotation (as opposed to logout/deactivation).
+  replacedById String?   @db.Uuid
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  @@index([userId])
+  @@index([familyId])
 }
 
 // ─── Catalogue ──────────────────────────────────────────────────────────────
