@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMoney, lineTotal, paisaToAmount, toPaisa } from './money';
+import { allocate, formatMoney, lineTotal, paisaToAmount, percentOf, toPaisa } from './money';
 
 describe('money helpers', () => {
   it('parses decimal strings into exact paisa', () => {
@@ -32,5 +32,19 @@ describe('money helpers', () => {
     expect(lineTotal('19.99', 1000)).toBe(1999000n);
     expect(lineTotal('bad', 2)).toBeNull();
     expect(lineTotal('1', Number.NaN)).toBeNull();
+  });
+
+  it('takes a percentage rounded half-up to the paisa, like the API', () => {
+    expect(percentOf(10000n, '10')).toBe(1000n);
+    expect(percentOf(333n, '12.5')).toBe(42n); // 41.625 → 42
+    expect(percentOf(5n, '10')).toBe(1n); // 0.5 → 1
+    expect(percentOf(4n, '10')).toBe(0n);
+  });
+
+  it('splits an amount by weight exactly, leftovers to the largest remainders', () => {
+    expect(allocate(100n, [1n, 1n, 1n])).toEqual([34n, 33n, 33n]);
+    expect(allocate(1000n, [3000n, 1000n])).toEqual([750n, 250n]);
+    expect(allocate(0n, [5n, 5n])).toEqual([0n, 0n]);
+    expect(allocate(7n, [0n, 0n])).toEqual([0n, 0n]);
   });
 });

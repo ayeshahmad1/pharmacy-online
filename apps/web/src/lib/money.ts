@@ -36,3 +36,41 @@ export function lineTotal(unitPrice: string, quantity: number): bigint | null {
   if (paisa === null || !Number.isSafeInteger(quantity)) return null;
   return paisa * BigInt(quantity);
 }
+
+/**
+ * `percent` (e.g. "12.5") of a non-negative amount, rounded half-up to the
+ * paisa. Same rounding as the API, so a previewed discount matches the bill.
+ */
+export function percentOf(amount: bigint, percent: string): bigint {
+  // Basis points: "12.5" → 1250. Same format as money, so reuse the parser.
+  const basisPoints = toPaisa(percent) ?? 0n;
+  return (amount * basisPoints + 5_000n) / 10_000n;
+}
+
+/**
+ * Splits `total` across shares proportional to `weights`, exactly, the same
+ * way the API spreads a bill discount over its lines: the parts add up to
+ * `total` and leftover paisa go to the largest remainders (earlier index wins
+ * a tie).
+ */
+export function allocate(total: bigint, weights: bigint[]): bigint[] {
+  if (total === 0n) return weights.map(() => 0n);
+  const sum = weights.reduce((a, w) => a + w, 0n);
+  if (sum <= 0n) return weights.map(() => 0n);
+
+  const parts = weights.map((w) => (total * w) / sum);
+  let leftover = total - parts.reduce((a, p) => a + p, 0n);
+  const byRemainder = weights
+    .map((w, index) => ({ index, remainder: (total * w) % sum }))
+    .sort((a, b) =>
+      a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1,
+    );
+  for (const { index } of byRemainder) {
+    if (leftover === 0n) break;
+    parts[index]! += 1n;
+    leftover -= 1n;
+  }
+  return parts;
+}
+
+export const sumPaisa = (values: bigint[]): bigint => values.reduce((a, v) => a + v, 0n);
