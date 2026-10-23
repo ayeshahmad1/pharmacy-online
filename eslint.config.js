@@ -33,6 +33,15 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    // Supertest response bodies are `any`; asserting on them is the point of the test.
+    files: ['**/*.test.ts', 'apps/api/test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+    },
+  },
+  {
     files: ['apps/web/**/*.{ts,tsx}'],
     plugins: { 'react-hooks': reactHooks },
     languageOptions: { globals: globals.browser },

@@ -50,6 +50,9 @@ packages/shared/src/ (zod schemas, types, constants)
 - Consistent API error shape: `{ error: { code, message, details? } }`.
 - Never log passwords, tokens, or secrets. Secrets come from environment variables only; commit `.env.example`, never `.env`.
 - Add database indexes for barcode, medicine name search, batch expiry, and sale date.
+- Auth: short-lived JWT access token (Bearer header, kept in memory by the client) + opaque refresh token in an httpOnly `SameSite=Strict` cookie scoped to `/api/auth`, stored hashed in `RefreshToken` and rotated on every refresh (replaying a rotated token revokes the family). `authenticate` re-reads the user's status and role from the DB on each request. Protect routes with `authenticate` + `requireRole(...)`.
+- Write audit entries with `writeAudit(tx, ...)` inside the same transaction as the change.
+- API tests run against the `pharmacy_pos_test` database (wiped per test), never the dev database.
 
 ## Frontend rules
 
