@@ -76,6 +76,7 @@ packages/shared/src/ (zod schemas, types, constants)
 - Role-based menu items live in `src/lib/navigation.ts`; route guards in `src/router.tsx` must use the same role lists.
 - The service worker uses `registerType: 'prompt'`: updates are offered, never applied mid-sale. It precaches the app shell only; offline data belongs in IndexedDB (`src/offline/`).
 - Forms validate with the shared Zod schemas via `parseForm` (`src/lib/form.ts`); map API errors back onto fields with `serverFieldErrors`. Money stays a string in forms and requests; display and arithmetic go through `src/lib/money.ts` (BigInt paisa).
+- Billing (`src/features/billing/`): cart, pricing preview, payment settlement and API-error mapping are pure, unit-tested modules; the preview must mirror the API's `priceSale`/`settlePayments` exactly. The search box keeps focus between actions and typed characters are redirected to it. Each bill keeps one idempotency key for its whole life (edits, holds, retries); only a completed or cleared bill gets a new one. Held bills and the in-progress cart live in IndexedDB (`src/offline/`); the offline sale queue comes in Session 10.
 - List screens keep search, filters and page in the URL (`useListParams`) and render through `ListView` (skeleton, error with retry, no-matches, empty). Expiry/stock warning levels come from `src/lib/stock-status.ts` so every screen agrees.
 
 ## Commands

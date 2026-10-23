@@ -86,6 +86,22 @@ behind Nginx in production. Start the API first.
 - **Forms** validate with the shared Zod schemas through `parseForm` (`src/lib/form.ts`), and API
   field errors are mapped back onto the same fields. Money is typed and sent as strings and only
   formatted or multiplied in exact paisa (`src/lib/money.ts`).
+- **Billing (every role):** keyboard first. The search box has focus between actions and matches
+  brand name, generic/salt name or an exact barcode (a scanner types the code and Enter, which adds
+  it at once; `3*` before a scan adds three). Out-of-stock or expired-only medicines open a list of
+  in-stock substitutes with the same salt. Shortcuts: F2 search, ↑/↓ select line, +/− quantity, F4
+  type quantity, F6 line discount, F7 bill discount, F8 pay, F9 hold, F10 held bills, Del remove
+  line, Esc clear. The pay dialog takes cash, card, mobile wallet or a split; change comes only from
+  cash. Totals mirror the API's pricing, but the API re-prices every sale and is the authority;
+  rejections (short or expired stock, the cashier discount cap) are shown on the line they concern.
+  The bill being built and held bills are kept in IndexedDB on the device (`src/offline/`), so a
+  reload never loses a cart; prices and stock are re-read on resume. The search uses
+  `GET /api/inventory/sellable?q=`, `GET /api/inventory/sellable/:id` and
+  `GET /api/inventory/medicines/:id/substitutes`.
+- **Receipts:** an 80mm thermal layout printed from the browser (`P` on the sale-complete screen, or
+  automatically after each sale if ticked on that device). Set the printer's paper to the 80mm roll.
+  Header and footer come from `VITE_PHARMACY_NAME`, `VITE_PHARMACY_ADDRESS`, `VITE_PHARMACY_PHONE`
+  and `VITE_RECEIPT_FOOTER` in `apps/web/.env`.
 - **Warnings:** expiring within 30 days is red, within 90 days amber (`src/lib/stock-status.ts`);
   out of stock is red, at or below the reorder level amber. Expiring soon uses the API's
   `EXPIRY_WARNING_DAYS` window unless another is picked.
