@@ -13,9 +13,12 @@ import type {
   Paginated,
   ReceiveStockBody,
   RoleCode,
+  SellableMedicineDto,
+  SellableSearchQuery,
   StockAdjustmentDto,
   StockMovementDto,
   StockSummaryDto,
+  SubstitutesDto,
   WriteOffExpiredBody,
 } from '@pharmacy/shared';
 import { Prisma, type RecordStatus } from '@prisma/client';
@@ -453,17 +456,21 @@ type StockRow = {
 function stockSql(today: string, where: Prisma.Sql) {
   return Prisma.sql`
     FROM "Medicine" m
-    CROSS JOIN LATERAL (
-      SELECT
-        COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" > ${today}::date), 0)::int AS "sellable",
-        COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" <= ${today}::date), 0)::int AS "expired",
-        MIN(bs."expiryDate") FILTER (WHERE bs."expiryDate" > ${today}::date AND bs."qty" > 0) AS "nextExpiry"
-      FROM (
-        SELECT b."expiryDate", ${batchQuantitySql} AS "qty"
-        FROM "Batch" b WHERE b."medicineId" = m."id"
-      ) bs
-    ) s
+    CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
     ${where}`;
+}
+
+/** The per-medicine totals subquery, for a lateral join on a Medicine row aliased `m`. */
+function stockTotalsSql(today: string) {
+  return Prisma.sql`
+    SELECT
+      COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" > ${today}::date), 0)::int AS "sellable",
+      COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" <= ${today}::date), 0)::int AS "expired",
+      MIN(bs."expiryDate") FILTER (WHERE bs."expiryDate" > ${today}::date AND bs."qty" > 0) AS "nextExpiry"
+    FROM (
+      SELECT b."expiryDate", ${batchQuantitySql} AS "qty"
+      FROM "Batch" b WHERE b."medicineId" = m."id"
+    ) bs`;
 }
 
 const stockColumns = Prisma.sql`
@@ -514,6 +521,107 @@ export async function listStock(query: ListStockQuery): Promise<Paginated<StockS
       ORDER BY m."name", m."id" ${pageSql(query)}`,
   ]);
   return { items: rows.map(toStockSummaryDto), total, page: query.page, pageSize: query.pageSize };
+}
+
+// ─── Billing lookups ────────────────────────────────────────────────────────
+
+type SellableRow = {
+  id: string;
+  name: string;
+  genericName: string | null;
+  barcode: string | null;
+  unit: string;
+  sellingPrice: Prisma.Decimal;
+  reorderLevel: number;
+  sellable: number;
+  expired: number;
+  nextExpiry: Date | null;
+  barcodeMatch: boolean;
+};
+
+const sellableColumns = Prisma.sql`
+  m."id", m."name", m."genericName", m."barcode", m."unit", m."sellingPrice", m."reorderLevel",
+  s."sellable", s."expired", s."nextExpiry"`;
+
+function toSellableDto(r: SellableRow): SellableMedicineDto {
+  return {
+    id: r.id,
+    name: r.name,
+    genericName: r.genericName,
+    barcode: r.barcode,
+    unit: r.unit,
+    sellingPrice: r.sellingPrice.toFixed(2),
+    sellableQuantity: r.sellable,
+    expiredQuantity: r.expired,
+    isLowStock: r.sellable <= r.reorderLevel,
+    nextExpiry: r.nextExpiry ? toDateOnly(r.nextExpiry) : null,
+    barcodeMatch: r.barcodeMatch,
+  };
+}
+
+/**
+ * The billing screen's search: active medicines whose barcode equals the
+ * term (a scan) or whose brand or generic name contains it. Ranked exact
+ * barcode, exact name, name prefix, generic prefix, then the rest. Out-of-
+ * stock medicines are included so the counter can offer a substitute.
+ *
+ * The inner query picks and limits the page first, so stock is only summed
+ * for the rows returned.
+ */
+export async function searchSellable(query: SellableSearchQuery): Promise<SellableMedicineDto[]> {
+  const today = businessToday();
+  const term = escapeLike(query.q);
+  const contains = `%${term}%`;
+  const prefix = `${term}%`;
+  const rows = await prisma.$queryRaw<SellableRow[]>`
+    SELECT ${sellableColumns}, m."rank" = 0 AS "barcodeMatch"
+    FROM (
+      SELECT m.*, CASE
+        WHEN m."barcode" = ${query.q} THEN 0
+        WHEN m."name" ILIKE ${term} THEN 1
+        WHEN m."name" ILIKE ${prefix} THEN 2
+        WHEN m."genericName" ILIKE ${prefix} THEN 3
+        ELSE 4 END AS "rank"
+      FROM "Medicine" m
+      WHERE m."status" = 'ACTIVE'
+        AND (m."barcode" = ${query.q} OR m."name" ILIKE ${contains} OR m."genericName" ILIKE ${contains})
+      ORDER BY "rank", m."name", m."id"
+      LIMIT ${query.limit}
+    ) m
+    CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    ORDER BY m."rank", m."name", m."id"`;
+  return rows.map(toSellableDto);
+}
+
+/** Most substitutes listed for one medicine. */
+const MAX_SUBSTITUTES = 20;
+
+/**
+ * Active medicines with the same generic/salt name (case-insensitive) that
+ * have sellable stock, for when the one asked for is out of stock. Largest
+ * stock first, so the counter reaches for what is plentiful.
+ */
+export async function listSubstitutes(medicineId: string): Promise<SubstitutesDto> {
+  const today = businessToday();
+  const [row] = await prisma.$queryRaw<SellableRow[]>`
+    SELECT ${sellableColumns}, false AS "barcodeMatch"
+    FROM "Medicine" m CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    WHERE m."id" = ${medicineId}::uuid`;
+  if (!row) throw notFound('Medicine not found');
+  if (!row.genericName) return { medicine: toSellableDto(row), substitutes: [] };
+
+  // ILIKE without wildcards is an exact, case-insensitive match served by the
+  // trigram index on genericName.
+  const rows = await prisma.$queryRaw<SellableRow[]>`
+    SELECT ${sellableColumns}, false AS "barcodeMatch"
+    FROM "Medicine" m CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    WHERE m."status" = 'ACTIVE'
+      AND m."id" <> ${medicineId}::uuid
+      AND m."genericName" ILIKE ${escapeLike(row.genericName)}
+      AND s."sellable" > 0
+    ORDER BY s."sellable" DESC, m."name", m."id"
+    LIMIT ${MAX_SUBSTITUTES}`;
+  return { medicine: toSellableDto(row), substitutes: rows.map(toSellableDto) };
 }
 
 /**

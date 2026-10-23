@@ -8,6 +8,7 @@ import {
   lowStockQuerySchema,
   medicineStockQuerySchema,
   receiveStockBodySchema,
+  sellableSearchQuerySchema,
   writeOffExpiredBodySchema,
 } from '@pharmacy/shared';
 import { Router } from 'express';
@@ -28,6 +29,17 @@ inventoryRouter.get(
   '/medicines/:id/stock',
   validate({ params: idParamsSchema, query: medicineStockQuerySchema }),
   controller.medicineStock,
+);
+// Billing lookups: price and sellable stock together, for every role.
+inventoryRouter.get(
+  '/sellable',
+  validate({ query: sellableSearchQuerySchema }),
+  controller.searchSellable,
+);
+inventoryRouter.get(
+  '/medicines/:id/substitutes',
+  validate({ params: idParamsSchema }),
+  controller.substitutes,
 );
 inventoryRouter.get('/batches/:id', validate({ params: idParamsSchema }), controller.getBatch);
 

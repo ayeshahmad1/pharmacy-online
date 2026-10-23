@@ -8,6 +8,7 @@ import type {
   LowStockQuery,
   MedicineStockQuery,
   ReceiveStockBody,
+  SellableSearchQuery,
   WriteOffExpiredBody,
 } from '@pharmacy/shared';
 import type { Request, RequestHandler } from 'express';
@@ -46,6 +47,14 @@ export const medicineStock: RequestHandler = async (req, res) => {
     viewer(req),
   );
   res.json({ stock });
+};
+
+export const searchSellable: RequestHandler = async (req, res) => {
+  res.json({ items: await service.searchSellable(query<SellableSearchQuery>(req)) });
+};
+
+export const substitutes: RequestHandler = async (req, res) => {
+  res.json(await service.listSubstitutes(params(req).id));
 };
 
 export const getBatch: RequestHandler = async (req, res) => {

@@ -123,6 +123,16 @@ export type ExpiringStockQuery = z.infer<typeof expiringStockQuerySchema>;
 export const expiredStockQuerySchema = paginationQuerySchema;
 export type ExpiredStockQuery = z.infer<typeof expiredStockQuerySchema>;
 
+/**
+ * Billing search: matches the brand name, the generic/salt name, or a barcode
+ * exactly. Only active medicines (the ones that can be sold) are returned.
+ */
+export const sellableSearchQuerySchema = z.object({
+  q: searchTermSchema,
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+export type SellableSearchQuery = z.infer<typeof sellableSearchQuerySchema>;
+
 export const listMovementsQuerySchema = paginationQuerySchema.extend({
   batchId: z.uuid().optional(),
   medicineId: z.uuid().optional(),
@@ -174,6 +184,36 @@ export type StockSummaryDto = {
   isLowStock: boolean;
   /** Earliest expiry among non-expired batches that still have stock. */
   nextExpiry: string | null;
+};
+
+/**
+ * What the billing screen needs to add a medicine to the cart: its catalogue
+ * price and what can be sold right now. The API still prices and allocates
+ * the sale itself; this is for display.
+ */
+export type SellableMedicineDto = {
+  id: string;
+  name: string;
+  genericName: string | null;
+  barcode: string | null;
+  unit: string;
+  /** PKR per unit, e.g. "120.50". */
+  sellingPrice: string;
+  /** Stock in non-expired batches. */
+  sellableQuantity: number;
+  /** Stock sitting in expired batches: on the shelf but never sellable. */
+  expiredQuantity: number;
+  isLowStock: boolean;
+  /** Earliest expiry among non-expired batches with stock: the batch FEFO sells next. */
+  nextExpiry: string | null;
+  /** The search term equals this medicine's barcode. */
+  barcodeMatch: boolean;
+};
+
+/** Medicines with the same generic/salt name that are in stock. */
+export type SubstitutesDto = {
+  medicine: SellableMedicineDto;
+  substitutes: SellableMedicineDto[];
 };
 
 export type MedicineStockDto = StockSummaryDto & {
