@@ -47,7 +47,13 @@ packages/shared/src/ (zod schemas, types, constants)
     - Payments: CASH, CARD, MOBILE_WALLET, split allowed. Change is only given from cash (one cash entry per sale); card/wallet together may not exceed the total.
     - Receipt numbers: `S-YYYYMMDD-NNNN`, restarting each business day (pharmacy timezone), gap-free.
     - Every sale carries a client-generated idempotency key (UUID). A repeat returns the original sale (200, `replayed: true`); the same key with a different cart or user is rejected (409 `IDEMPOTENCY_KEY_REUSED`).
-    - Void: ADMIN/PHARMACIST only, any time, reason required. Stock goes back to the original batches as RETURN movements linked to the sale item. Not allowed once anything has been returned against the sale.
+    - Void: ADMIN/PHARMACIST only, any time, reason required. Stock goes back to the original batches as RETURN movements linked to the sale item. Not allowed once anything has been returned against the sale, or while a return is pending.
+12. **Returns** (decided in Session 6):
+    - A return is against one sale and names sale lines (batches) and quantities; reason required. Any role may raise one against any sale. A CASHIER's return is `PENDING` until an ADMIN/PHARMACIST approves (`COMPLETED`) or rejects it (`REJECTED`, reason required); an ADMIN/PHARMACIST's return completes at once. Cashiers only read the returns they raised.
+    - A line can never take back more than sold minus units on PENDING and COMPLETED returns (pending requests hold their units). Return numbers: `R-YYYYMMDD-NNNN`, gap-free per business day.
+    - Refunds are computed by the server: the line's paid total pro rata, rounded down, and the return taking a line's last units gets the remainder, so a fully returned line refunds exactly what was paid.
+    - Refunds go back only by methods the sale was paid with, each capped by what was paid that way minus earlier (pending or completed) refunds. Staff may give the split; otherwise cash first, then card, then wallet.
+    - On completion, restockable units go back to the sale line's batch as RETURN movements linked to the return item. Damaged units (`restock: false`) and units whose batch has expired get no movement. A sale whose every unit is back becomes `REFUNDED`.
 
 ## Architecture rules
 
