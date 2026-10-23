@@ -79,6 +79,7 @@ export function createMedicine(opts: {
   genericName?: string | null;
   barcode?: string | null;
   status?: RecordStatus;
+  sellingPrice?: string;
 }) {
   return prisma.medicine.create({
     data: {
@@ -87,7 +88,7 @@ export function createMedicine(opts: {
       barcode: opts.barcode ?? null,
       categoryId: opts.categoryId,
       unit: 'tablet',
-      sellingPrice: '10.00',
+      sellingPrice: opts.sellingPrice ?? '10.00',
       status: opts.status ?? 'ACTIVE',
     },
   });
