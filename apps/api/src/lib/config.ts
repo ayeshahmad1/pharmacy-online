@@ -40,6 +40,8 @@ const envSchema = z.object({
 
   /** Largest total discount a cashier may give, as a percent of the bill subtotal. */
   CASHIER_MAX_DISCOUNT_PERCENT: z.coerce.number().int().min(0).max(100).default(10),
+  /** Offline sales reaching the server later than this after they were made are refused. */
+  OFFLINE_SALE_MAX_AGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
 });
 
 function isValidTimeZone(tz: string): boolean {

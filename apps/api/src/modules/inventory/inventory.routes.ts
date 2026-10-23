@@ -36,6 +36,8 @@ inventoryRouter.get(
   validate({ query: sellableSearchQuerySchema }),
   controller.searchSellable,
 );
+// The whole sellable catalogue, cached on the billing device for offline sales.
+inventoryRouter.get('/offline-catalogue', controller.offlineCatalogue);
 inventoryRouter.get('/sellable/:id', validate({ params: idParamsSchema }), controller.getSellable);
 inventoryRouter.get(
   '/medicines/:id/substitutes',

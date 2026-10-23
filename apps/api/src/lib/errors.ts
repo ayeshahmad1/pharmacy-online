@@ -31,6 +31,10 @@ export const conflict = (message: string, details?: unknown) =>
 export const idempotencyKeyReused = (message: string) =>
   new AppError(409, 'IDEMPOTENCY_KEY_REUSED', message);
 
+/** An offline sale would now total differently from what the customer was charged. */
+export const priceChanged = (message: string, details?: unknown) =>
+  new AppError(409, 'PRICE_CHANGED', message, details);
+
 /** A stock-removing change asks for more than the batch has on hand (rule 3). */
 export const insufficientStock = (message: string, details?: unknown) =>
   new AppError(409, 'INSUFFICIENT_STOCK', message, details);

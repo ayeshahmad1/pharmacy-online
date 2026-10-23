@@ -21,6 +21,7 @@ import {
   idempotencyKeyReused,
   insufficientStock,
   notFound,
+  priceChanged,
 } from '../../lib/errors';
 import { formatPaisa, toPaisa } from '../../lib/money';
 import { prisma } from '../../lib/prisma';
@@ -132,6 +133,46 @@ async function loadSale(id: string): Promise<SaleDto> {
 
 export type CreateSaleResult = { sale: SaleDto; replayed: boolean };
 
+export type CreateSaleOptions = {
+  /**
+   * A pharmacist/admin saving a flagged offline sale for its cashier. Their
+   * approval lifts the cashier discount cap, and the age limit no longer
+   * applies (the sale reached the server in time and was flagged).
+   */
+  review?: { by: Seller; acceptCurrentPrices: boolean };
+  /** Runs inside the sale's transaction once the sale is written (not on a replay). */
+  onCreated?: (
+    tx: Prisma.TransactionClient,
+    sale: { id: string; receiptNumber: string },
+  ) => Promise<void>;
+};
+
+/** How far ahead of the server's clock an offline sale's time may be. */
+const CLOCK_SKEW_MS = 5 * 60 * 1000;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * When an offline sale happened, checked against the server's clock: not in
+ * the future (beyond a little clock skew) and, unless it is being reviewed,
+ * not older than OFFLINE_SALE_MAX_AGE_DAYS. Null for an online sale.
+ */
+function offlineSoldAt(input: CreateSaleBody, reviewed: boolean, now = new Date()): Date | null {
+  if (!input.offline) return null;
+  const soldAt = new Date(input.offline.soldAt);
+  if (soldAt.getTime() > now.getTime() + CLOCK_SKEW_MS) {
+    throw badRequest("The offline sale's time is in the future; check this device's clock", {
+      field: 'offline.soldAt',
+    });
+  }
+  const maxDays = config.OFFLINE_SALE_MAX_AGE_DAYS;
+  if (!reviewed && now.getTime() - soldAt.getTime() > maxDays * MS_PER_DAY) {
+    throw badRequest(`Offline sales must reach the server within ${maxDays} days`, {
+      field: 'offline.soldAt',
+    });
+  }
+  return soldAt;
+}
+
 /**
  * Records a completed sale in one transaction (CLAUDE.md rule 4): prices the
  * cart from the catalogue, takes stock from unexpired batches earliest expiry
@@ -140,9 +181,20 @@ export type CreateSaleResult = { sale: SaleDto; replayed: boolean };
  *
  * Sending the same idempotency key again returns the sale saved the first
  * time (`replayed: true`) instead of selling twice.
+ *
+ * A sale made offline (`input.offline`) is dated when it happened at the
+ * counter: that business day decides which batches had expired and which
+ * day's receipt series it joins. It is refused with PRICE_CHANGED if it would
+ * total differently from what the customer was charged.
  */
-export async function createSale(input: CreateSaleBody, seller: Seller): Promise<CreateSaleResult> {
-  const today = businessToday();
+export async function createSale(
+  input: CreateSaleBody,
+  seller: Seller,
+  options: CreateSaleOptions = {},
+): Promise<CreateSaleResult> {
+  const { review } = options;
+  const soldAt = offlineSoldAt(input, !!review);
+  const today = businessToday(soldAt ?? undefined);
   const requestHash = hashRequest(input);
 
   const { saleId, replayed } = await prisma.$transaction(async (tx) => {
@@ -170,7 +222,25 @@ export async function createSale(input: CreateSaleBody, seller: Seller): Promise
       })),
       input.discount,
     );
-    if (seller.role === 'CASHIER') {
+    if (input.offline && !review?.acceptCurrentPrices) {
+      const expected = toPaisa(input.offline.expectedTotal);
+      if (priced.grandTotal !== expected) {
+        throw priceChanged(
+          `Prices have changed: this sale now totals ${formatPaisa(priced.grandTotal)}, but the customer was charged ${formatPaisa(expected)}`,
+          {
+            expectedTotal: formatPaisa(expected),
+            total: formatPaisa(priced.grandTotal),
+            items: input.items.map((item, index) => ({
+              index,
+              medicineId: item.medicineId,
+              unitPrice: medicines.get(item.medicineId)!.sellingPrice.toFixed(2),
+            })),
+          },
+        );
+      }
+    }
+    // A reviewer's approval stands in for the cashier's limited authority.
+    if (seller.role === 'CASHIER' && (!review || review.by.role === 'CASHIER')) {
       const maxPercent = config.CASHIER_MAX_DISCOUNT_PERCENT;
       const cap = discountCap(priced.subtotal, maxPercent);
       if (priced.discountTotal > cap) {
@@ -211,6 +281,7 @@ export async function createSale(input: CreateSaleBody, seller: Seller): Promise
         grandTotal: formatPaisa(priced.grandTotal),
         changeDue: formatPaisa(settlement.change),
         notes: input.notes ?? null,
+        ...(soldAt && { soldAt }),
       },
       select: { id: true },
     });
@@ -261,6 +332,11 @@ export async function createSale(input: CreateSaleBody, seller: Seller): Promise
         grandTotal: formatPaisa(priced.grandTotal),
         changeDue: formatPaisa(settlement.change),
         discount: input.discount ?? null,
+        ...(input.offline && { offline: input.offline }),
+        ...(review && {
+          approvedBy: review.by.id,
+          acceptCurrentPrices: review.acceptCurrentPrices,
+        }),
         items: items.map((item, i) => ({
           medicineId: lines[i]!.medicineId,
           batchId: item.batchId,
@@ -277,15 +353,20 @@ export async function createSale(input: CreateSaleBody, seller: Seller): Promise
       },
       meta: seller.meta,
     });
+    await options.onCreated?.(tx, { id: sale.id, receiptNumber });
     return { saleId: sale.id, replayed: false };
   }, SALE_TX);
 
   return { sale: await loadSale(saleId), replayed };
 }
 
-/** SHA-256 of everything in the request except the key itself. */
+/**
+ * SHA-256 of the cart: everything in the request except the key itself and
+ * the offline details, so a bill tried online whose reply was lost, then
+ * queued offline under the same key, replays instead of being refused.
+ */
 function hashRequest(input: CreateSaleBody): string {
-  const { idempotencyKey: _key, ...rest } = input;
+  const { idempotencyKey: _key, offline: _offline, ...rest } = input;
   return createHash('sha256').update(JSON.stringify(rest)).digest('hex');
 }
 

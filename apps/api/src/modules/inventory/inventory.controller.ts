@@ -53,6 +53,12 @@ export const searchSellable: RequestHandler = async (req, res) => {
   res.json({ items: await service.searchSellable(query<SellableSearchQuery>(req)) });
 };
 
+export const offlineCatalogue: RequestHandler = async (_req, res) => {
+  // Always the live numbers: never let a proxy or the browser serve an old copy.
+  res.set('Cache-Control', 'no-store');
+  res.json(await service.getOfflineCatalogue());
+};
+
 export const getSellable: RequestHandler = async (req, res) => {
   res.json({ medicine: await service.getSellable(params(req).id) });
 };

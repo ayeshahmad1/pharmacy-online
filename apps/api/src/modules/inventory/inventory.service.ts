@@ -10,6 +10,8 @@ import type {
   LowStockQuery,
   MedicineStockDto,
   MedicineStockQuery,
+  OfflineCatalogueDto,
+  OfflineMedicineDto,
   Paginated,
   ReceiveStockBody,
   RoleCode,
@@ -608,6 +610,61 @@ async function sellableRow(medicineId: string, today: string): Promise<SellableR
  */
 export async function getSellable(medicineId: string): Promise<SellableMedicineDto> {
   return toSellableDto(await sellableRow(medicineId, businessToday()));
+}
+
+/**
+ * Every active medicine with its price and each batch that has stock, so the
+ * billing screen can keep selling while the server is unreachable. Expired
+ * batches are included (the device works out what has expired by the time
+ * it sells); batches come in the order sales take them (FEFO). No cost prices.
+ */
+export async function getOfflineCatalogue(now = new Date()): Promise<OfflineCatalogueDto> {
+  const [medicines, batches] = await prisma.$transaction([
+    prisma.medicine.findMany({
+      where: { status: 'ACTIVE' },
+      select: {
+        id: true,
+        name: true,
+        genericName: true,
+        barcode: true,
+        unit: true,
+        sellingPrice: true,
+        reorderLevel: true,
+      },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.$queryRaw<
+      { id: string; medicineId: string; batchNumber: string; expiryDate: Date; qty: number }[]
+    >`
+      SELECT b."id", b."medicineId", b."batchNumber", b."expiryDate", s."qty"
+      FROM (
+        SELECT "batchId", SUM("quantity")::int AS "qty" FROM "StockMovement" GROUP BY "batchId"
+      ) s
+      JOIN "Batch" b ON b."id" = s."batchId"
+      JOIN "Medicine" m ON m."id" = b."medicineId"
+      WHERE m."status" = 'ACTIVE' AND s."qty" > 0
+      ORDER BY b."expiryDate", b."createdAt", b."id"`,
+  ]);
+
+  const byMedicine = new Map<string, OfflineMedicineDto>(
+    medicines.map((m) => [m.id, { ...m, sellingPrice: m.sellingPrice.toFixed(2), batches: [] }]),
+  );
+  for (const b of batches) {
+    byMedicine.get(b.medicineId)?.batches.push({
+      id: b.id,
+      batchNumber: b.batchNumber,
+      expiryDate: toDateOnly(b.expiryDate),
+      quantity: b.qty,
+    });
+  }
+  return {
+    generatedAt: now.toISOString(),
+    businessDate: businessToday(now),
+    timeZone: config.BUSINESS_TIMEZONE,
+    cashierMaxDiscountPercent: config.CASHIER_MAX_DISCOUNT_PERCENT,
+    offlineSaleMaxAgeDays: config.OFFLINE_SALE_MAX_AGE_DAYS,
+    medicines: [...byMedicine.values()],
+  };
 }
 
 /** Most substitutes listed for one medicine. */
