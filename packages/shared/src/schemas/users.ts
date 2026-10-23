@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { RECORD_STATUSES, ROLE_CODES } from '../constants';
 import { passwordSchema, usernameSchema } from './auth';
-import { paginationQuerySchema } from './common';
+import { emailSchema, nonEmptyPatch, paginationQuerySchema } from './common';
 
 const fullNameSchema = z.string().trim().min(1, 'Full name is required').max(100);
-const emailSchema = z.string().trim().toLowerCase().max(254).pipe(z.email('Invalid email'));
 
 export const createUserBodySchema = z.strictObject({
   username: usernameSchema,
@@ -17,15 +16,13 @@ export type CreateUserBody = z.infer<typeof createUserBodySchema>;
 
 // Status is changed only through the deactivate/activate endpoints, and the
 // password only through reset-password, so each has its own audit entry.
-export const updateUserBodySchema = z
-  .strictObject({
+export const updateUserBodySchema = nonEmptyPatch(
+  z.strictObject({
     fullName: fullNameSchema.optional(),
     email: emailSchema.nullable().optional(),
     role: z.enum(ROLE_CODES).optional(),
-  })
-  .refine((b) => Object.values(b).some((v) => v !== undefined), {
-    message: 'Provide at least one field to update',
-  });
+  }),
+);
 export type UpdateUserBody = z.infer<typeof updateUserBodySchema>;
 
 export const resetPasswordBodySchema = z.strictObject({

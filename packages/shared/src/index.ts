@@ -3,3 +3,6 @@ export * from './errors';
 export * from './schemas/common';
 export * from './schemas/auth';
 export * from './schemas/users';
+export * from './schemas/categories';
+export * from './schemas/suppliers';
+export * from './schemas/medicines';
