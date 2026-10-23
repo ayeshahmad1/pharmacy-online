@@ -1,10 +1,13 @@
 import { z } from 'zod';
 import type { PaymentMethod, SaleStatus } from '../constants';
 import { PAYMENT_METHODS, SALE_STATUSES } from '../constants';
-import { moneySchema, optionalTextSchema, paginationQuerySchema, searchTermSchema } from './common';
+import {
+  optionalTextSchema,
+  paginationQuerySchema,
+  positiveMoneySchema,
+  searchTermSchema,
+} from './common';
 import { dateOnlySchema } from './inventory';
-
-const positiveMoneySchema = moneySchema.refine((v) => /[1-9]/.test(v), 'Must be more than zero');
 
 /** A percentage with at most 2 decimal places, e.g. "10" or "12.5". */
 const percentSchema = z

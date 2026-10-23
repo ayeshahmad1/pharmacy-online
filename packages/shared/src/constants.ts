@@ -21,7 +21,7 @@ export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 export const SALE_STATUSES = ['COMPLETED', 'VOIDED', 'REFUNDED'] as const;
 export type SaleStatus = (typeof SALE_STATUSES)[number];
 
-export const RETURN_STATUSES = ['COMPLETED', 'VOIDED'] as const;
+export const RETURN_STATUSES = ['PENDING', 'COMPLETED', 'REJECTED', 'VOIDED'] as const;
 export type ReturnStatus = (typeof RETURN_STATUSES)[number];
 
 export const PAYMENT_METHODS = ['CASH', 'CARD', 'MOBILE_WALLET'] as const;

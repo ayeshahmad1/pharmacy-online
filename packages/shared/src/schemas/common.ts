@@ -33,6 +33,12 @@ export const moneySchema = z
   .trim()
   .regex(/^\d{1,10}(\.\d{1,2})?$/, 'Must be an amount like "120" or "120.50"');
 
+/** Money as above, and more than zero. */
+export const positiveMoneySchema = moneySchema.refine(
+  (v) => /[1-9]/.test(v),
+  'Must be more than zero',
+);
+
 /**
  * Optional text field. Blank strings become null, so a client can clear a
  * field by sending "" or null; undefined means "not provided".
