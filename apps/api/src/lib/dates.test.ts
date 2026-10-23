@@ -6,6 +6,7 @@ import {
   daysBetween,
   fromDateOnly,
   isExpiredOn,
+  startOfBusinessDay,
   toDateOnly,
 } from './dates';
 
@@ -53,5 +54,25 @@ describe('isExpiredOn', () => {
     expect(isExpiredOn('2027-06-30', '2027-06-29')).toBe(false);
     expect(isExpiredOn('2027-06-30', '2027-06-30')).toBe(true);
     expect(isExpiredOn('2027-06-30', '2027-07-01')).toBe(true);
+  });
+});
+
+describe('startOfBusinessDay', () => {
+  it('is local midnight in the pharmacy timezone', () => {
+    // Karachi is UTC+5 all year.
+    expect(startOfBusinessDay('2026-10-23', 'Asia/Karachi').toISOString()).toBe(
+      '2026-10-22T19:00:00.000Z',
+    );
+    expect(startOfBusinessDay('2026-10-23', 'UTC').toISOString()).toBe('2026-10-23T00:00:00.000Z');
+  });
+
+  it('handles zones behind UTC and DST days', () => {
+    // New York switches to EDT (UTC-4) on 2027-03-14; midnight is still EST (UTC-5).
+    expect(startOfBusinessDay('2027-03-14', 'America/New_York').toISOString()).toBe(
+      '2027-03-14T05:00:00.000Z',
+    );
+    expect(startOfBusinessDay('2027-03-15', 'America/New_York').toISOString()).toBe(
+      '2027-03-15T04:00:00.000Z',
+    );
   });
 });

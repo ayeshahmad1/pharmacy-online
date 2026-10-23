@@ -41,3 +41,40 @@ export function daysBetween(from: string, to: string): number {
 
 /** A batch is expired from its expiry date onward (CLAUDE.md rule 2). */
 export const isExpiredOn = (expiryDate: string, today: string): boolean => expiryDate <= today;
+
+/**
+ * The instant a business day starts (midnight in the pharmacy's timezone),
+ * for filtering timestamps such as Sale.soldAt by day.
+ */
+export function startOfBusinessDay(date: string, timeZone = config.BUSINESS_TIMEZONE): Date {
+  const midnightUtc = fromDateOnly(date).getTime();
+  // Guess with the zone's offset at UTC midnight, then correct once with the
+  // offset at the guess, which handles a DST change between the two.
+  const guess = midnightUtc - zoneOffsetMs(midnightUtc, timeZone);
+  return new Date(midnightUtc - zoneOffsetMs(guess, timeZone));
+}
+
+/** How far ahead of UTC the zone's wall clock is at `at`, in ms. */
+function zoneOffsetMs(at: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(at));
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)!.value);
+  const wallClockAsUtc = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour'),
+    get('minute'),
+    get('second'),
+  );
+  return wallClockAsUtc - (at - (at % 1000));
+}
