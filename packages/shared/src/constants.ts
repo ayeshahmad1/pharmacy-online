@@ -26,3 +26,6 @@ export type ReturnStatus = (typeof RETURN_STATUSES)[number];
 
 export const PAYMENT_METHODS = ['CASH', 'CARD', 'MOBILE_WALLET'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+export const OFFLINE_CONFLICT_STATUSES = ['OPEN', 'RESOLVED', 'DISMISSED'] as const;
+export type OfflineConflictStatus = (typeof OFFLINE_CONFLICT_STATUSES)[number];

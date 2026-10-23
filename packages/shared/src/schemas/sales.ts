@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { PaymentMethod, SaleStatus } from '../constants';
 import { PAYMENT_METHODS, SALE_STATUSES } from '../constants';
 import {
+  moneySchema,
   optionalTextSchema,
   paginationQuerySchema,
   positiveMoneySchema,
@@ -56,6 +57,21 @@ const paymentInputSchema = z.strictObject({
 });
 export type PaymentInput = z.infer<typeof paymentInputSchema>;
 
+/**
+ * Sent with a sale made while the counter was offline and synced later. The
+ * API still prices the sale from the catalogue; `expectedTotal` is what the
+ * customer was charged, and a sale that would now total differently is
+ * refused (PRICE_CHANGED) instead of saved. `soldAt` is when it happened at
+ * the counter: it becomes the sale's time and decides its business day
+ * (receipt number and expiry checks). Not part of the idempotency check, so
+ * an online attempt whose reply was lost can be queued and replayed.
+ */
+export const offlineSaleInfoSchema = z.strictObject({
+  soldAt: z.iso.datetime({ offset: true, message: 'Must be an ISO date-time' }),
+  expectedTotal: moneySchema,
+});
+export type OfflineSaleInfo = z.infer<typeof offlineSaleInfoSchema>;
+
 export const createSaleBodySchema = z
   .strictObject({
     /**
@@ -69,6 +85,8 @@ export const createSaleBodySchema = z
     /** Several entries make a split payment. Empty only for a fully discounted bill. */
     payments: z.array(paymentInputSchema).max(10),
     notes: optionalTextSchema(500),
+    /** Only on sales queued offline; see offlineSaleInfoSchema. */
+    offline: offlineSaleInfoSchema.optional(),
   })
   .superRefine((body, ctx) => {
     const seen = new Set<string>();

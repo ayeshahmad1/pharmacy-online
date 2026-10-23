@@ -9,3 +9,4 @@ export * from './schemas/medicines';
 export * from './schemas/inventory';
 export * from './schemas/sales';
 export * from './schemas/returns';
+export * from './schemas/offline-sales';
