@@ -53,6 +53,10 @@ export const searchSellable: RequestHandler = async (req, res) => {
   res.json({ items: await service.searchSellable(query<SellableSearchQuery>(req)) });
 };
 
+export const getSellable: RequestHandler = async (req, res) => {
+  res.json({ medicine: await service.getSellable(params(req).id) });
+};
+
 export const substitutes: RequestHandler = async (req, res) => {
   res.json(await service.listSubstitutes(params(req).id));
 };

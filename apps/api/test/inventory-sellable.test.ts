@@ -141,6 +141,35 @@ describe('GET /api/inventory/sellable', () => {
   });
 });
 
+describe('GET /api/inventory/sellable/:id', () => {
+  it('returns the current price and stock of one medicine', async () => {
+    const { auth, medicine } = await setup();
+    const m = await medicine({ name: 'Brufen', sellingPrice: '40.00' });
+    await m.batch(30, 8);
+    await prisma.medicine.update({ where: { id: m.id }, data: { sellingPrice: '45.00' } });
+
+    const res = await request(app)
+      .get(`/api/inventory/sellable/${m.id}`)
+      .set('Authorization', auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body.medicine).toMatchObject({
+      id: m.id,
+      sellingPrice: '45.00',
+      sellableQuantity: 8,
+      nextExpiry: daysFromToday(30),
+    });
+  });
+
+  it('404s for an unknown medicine', async () => {
+    const { auth } = await setup();
+    const res = await request(app)
+      .get('/api/inventory/sellable/00000000-0000-4000-8000-000000000000')
+      .set('Authorization', auth);
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('GET /api/inventory/medicines/:id/substitutes', () => {
   it('lists in-stock medicines with the same generic name, largest stock first', async () => {
     const { auth, medicine } = await setup();

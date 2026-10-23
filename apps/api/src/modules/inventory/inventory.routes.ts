@@ -36,6 +36,7 @@ inventoryRouter.get(
   validate({ query: sellableSearchQuerySchema }),
   controller.searchSellable,
 );
+inventoryRouter.get('/sellable/:id', validate({ params: idParamsSchema }), controller.getSellable);
 inventoryRouter.get(
   '/medicines/:id/substitutes',
   validate({ params: idParamsSchema }),

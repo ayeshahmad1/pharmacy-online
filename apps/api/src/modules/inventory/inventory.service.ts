@@ -593,6 +593,23 @@ export async function searchSellable(query: SellableSearchQuery): Promise<Sellab
   return rows.map(toSellableDto);
 }
 
+async function sellableRow(medicineId: string, today: string): Promise<SellableRow> {
+  const [row] = await prisma.$queryRaw<SellableRow[]>`
+    SELECT ${sellableColumns}, false AS "barcodeMatch"
+    FROM "Medicine" m CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    WHERE m."id" = ${medicineId}::uuid`;
+  if (!row) throw notFound('Medicine not found');
+  return row;
+}
+
+/**
+ * Current price and stock of one medicine, e.g. to refresh a held bill
+ * before it is paid. Inactive medicines are found too; the sale rejects them.
+ */
+export async function getSellable(medicineId: string): Promise<SellableMedicineDto> {
+  return toSellableDto(await sellableRow(medicineId, businessToday()));
+}
+
 /** Most substitutes listed for one medicine. */
 const MAX_SUBSTITUTES = 20;
 
@@ -603,11 +620,7 @@ const MAX_SUBSTITUTES = 20;
  */
 export async function listSubstitutes(medicineId: string): Promise<SubstitutesDto> {
   const today = businessToday();
-  const [row] = await prisma.$queryRaw<SellableRow[]>`
-    SELECT ${sellableColumns}, false AS "barcodeMatch"
-    FROM "Medicine" m CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
-    WHERE m."id" = ${medicineId}::uuid`;
-  if (!row) throw notFound('Medicine not found');
+  const row = await sellableRow(medicineId, today);
   if (!row.genericName) return { medicine: toSellableDto(row), substitutes: [] };
 
   // ILIKE without wildcards is an exact, case-insensitive match served by the
