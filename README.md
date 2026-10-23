@@ -59,8 +59,31 @@ Override with `POSTGRES_PORT` and update `DATABASE_URL` to match.
 Send the access token as `Authorization: Bearer <token>`. The refresh token is an httpOnly cookie
 (`pharmacy_rt`, path `/api/auth`), so the browser sends it automatically to refresh/logout.
 
+## Web app
+
+`pnpm --filter web dev` starts the app on http://localhost:5173. Vite proxies `/api` to the API
+(`API_PROXY_TARGET`, default `http://localhost:4000`), so the browser stays same-origin, exactly as
+behind Nginx in production. Start the API first.
+
+- **Auth:** the access token is kept in memory only; a reload restores the session from the refresh
+  cookie. A 401 triggers one shared refresh and a retry. Refreshes are serialised across tabs with a
+  Web Lock, because the server treats a reused refresh token as theft. Logging out in one tab logs out
+  the others.
+- **Roles:** cashiers land on Billing and see only Billing, My sales and Returns. Pharmacists see
+  everything except Users. The menu lives in `apps/web/src/lib/navigation.ts`, and route guards in
+  `src/router.tsx` use the same role lists. The API enforces the real rules.
+- **PWA:** `pnpm --filter web build` emits a manifest and a Workbox service worker that precaches
+  the app shell (never API responses). New versions are offered with a "Reload" toast rather than
+  applied silently, so a cart is never lost mid-sale. The service worker is not registered under
+  `vite dev`; use `pnpm --filter web build && pnpm --filter web preview` to try it.
+- **UI:** shadcn/ui components live in `src/components/ui` (add more with `pnpm dlx shadcn@latest add
+<name>` from `apps/web`). Theme (light/dark/system) is stored in `localStorage`.
+
 ## Tests
 
 API integration tests run against a separate database, `pharmacy_pos_test`, on the Docker Postgres
 (override with `TEST_DATABASE_URL`). It is created and migrated automatically and **wiped before every
 test**; the suite refuses to run against a database whose name does not end in `_test`.
+
+Web tests (`pnpm --filter web test`) are plain Vitest unit tests with a mocked `fetch`; they need no
+server.

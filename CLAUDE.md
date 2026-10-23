@@ -72,6 +72,9 @@ packages/shared/src/ (zod schemas, types, constants)
 - The billing screen must be **keyboard-first**: autofocus on barcode/search, Enter to add, shortcuts for pay/hold/clear. Medicine search must feel instant.
 - Billing must keep working offline: queue completed sales in IndexedDB and sync when back online, with idempotency keys so a sale is never saved twice.
 - Large touch-friendly controls, clear empty/loading/error states, dark mode support.
+- All API calls go through `apps/web/src/lib/api.ts` (relative `/api`, same origin; Vite proxies in dev). Never store the access token in `localStorage`/`sessionStorage`. A network failure must never log the user out; only a rejected refresh does.
+- Role-based menu items live in `src/lib/navigation.ts`; route guards in `src/router.tsx` must use the same role lists.
+- The service worker uses `registerType: 'prompt'`: updates are offered, never applied mid-sale. It precaches the app shell only; offline data belongs in IndexedDB (`src/offline/`).
 
 ## Commands
 
