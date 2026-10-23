@@ -65,6 +65,15 @@ enum PaymentMethod {
   MOBILE_WALLET
 }
 
+/// An offline sale the API refused at sync waits as OPEN until a
+/// pharmacist/admin retries it successfully (RESOLVED, linked to the sale) or
+/// dismisses it with a reason (DISMISSED).
+enum OfflineConflictStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
 // ─── Users and roles ────────────────────────────────────────────────────────
 
 model Role {
@@ -91,14 +100,16 @@ model User {
   createdAt    DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
 
-  sales            Sale[]          @relation("SaleCashier")
-  voidedSales      Sale[]          @relation("SaleVoidedBy")
-  requestedReturns Return[]        @relation("ReturnRequestedBy")
-  reviewedReturns  Return[]        @relation("ReturnReviewedBy")
-  voidedReturns    Return[]        @relation("ReturnVoidedBy")
+  sales            Sale[]                @relation("SaleCashier")
+  voidedSales      Sale[]                @relation("SaleVoidedBy")
+  requestedReturns Return[]              @relation("ReturnRequestedBy")
+  reviewedReturns  Return[]              @relation("ReturnReviewedBy")
+  voidedReturns    Return[]              @relation("ReturnVoidedBy")
   stockMovements   StockMovement[]
   auditLogs        AuditLog[]
   refreshTokens    RefreshToken[]
+  offlineConflicts OfflineSaleConflict[] @relation("OfflineConflictCashier")
+  resolvedOffline  OfflineSaleConflict[] @relation("OfflineConflictResolvedBy")
 
   @@index([roleId])
 }
@@ -236,35 +247,37 @@ model StockMovement {
 // ─── Sales ──────────────────────────────────────────────────────────────────
 
 model Sale {
-  id             String     @id @default(uuid()) @db.Uuid
-  receiptNumber  String     @unique
+  id              String               @id @default(uuid()) @db.Uuid
+  receiptNumber   String               @unique
   /// Client-generated key so a retried or offline-synced sale is saved once.
-  idempotencyKey String?    @unique
+  idempotencyKey  String?              @unique
   /// SHA-256 of the request that created the sale, so reusing an idempotency
   /// key for a different cart is rejected instead of silently replayed.
-  requestHash    String?
-  status         SaleStatus @default(COMPLETED)
-  cashierId      String     @db.Uuid
-  cashier        User       @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: Restrict)
-  subtotal       Decimal    @db.Decimal(12, 2)
-  discountTotal  Decimal    @default(0) @db.Decimal(12, 2)
-  taxTotal       Decimal    @default(0) @db.Decimal(12, 2)
-  grandTotal     Decimal    @db.Decimal(12, 2)
+  requestHash     String?
+  status          SaleStatus           @default(COMPLETED)
+  cashierId       String               @db.Uuid
+  cashier         User                 @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: Restrict)
+  subtotal        Decimal              @db.Decimal(12, 2)
+  discountTotal   Decimal              @default(0) @db.Decimal(12, 2)
+  taxTotal        Decimal              @default(0) @db.Decimal(12, 2)
+  grandTotal      Decimal              @db.Decimal(12, 2)
   /// Cash handed back. Sum of Payment.amount always equals grandTotal.
-  changeDue      Decimal    @default(0) @db.Decimal(12, 2)
-  notes          String?
+  changeDue       Decimal              @default(0) @db.Decimal(12, 2)
+  notes           String?
   /// When the sale happened at the counter. Differs from createdAt for sales
   /// made offline and synced later; reports use this.
-  soldAt         DateTime   @default(now()) @db.Timestamptz(3)
-  voidedAt       DateTime?  @db.Timestamptz(3)
-  voidedById     String?    @db.Uuid
-  voidedBy       User?      @relation("SaleVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
-  voidReason     String?
-  items          SaleItem[]
-  payments       Payment[]
-  returns        Return[]
-  createdAt      DateTime   @default(now()) @db.Timestamptz(3)
-  updatedAt      DateTime   @updatedAt @db.Timestamptz(3)
+  soldAt          DateTime             @default(now()) @db.Timestamptz(3)
+  voidedAt        DateTime?            @db.Timestamptz(3)
+  voidedById      String?              @db.Uuid
+  voidedBy        User?                @relation("SaleVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason      String?
+  items           SaleItem[]
+  payments        Payment[]
+  returns         Return[]
+  /// The flagged offline sale this sale was saved from on review, if any.
+  offlineConflict OfflineSaleConflict?
+  createdAt       DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime             @updatedAt @db.Timestamptz(3)
 
   @@index([soldAt])
   @@index([cashierId, soldAt]) // "own sales" for cashiers
@@ -400,6 +413,45 @@ model ReturnRefund {
 
   @@unique([returnId, method]) // also serves lookups by returnId
   @@index([method])
+}
+
+// ─── Offline sync ───────────────────────────────────────────────────────────
+
+/// A sale made offline that the API refused when the counter synced it (stock
+/// gone, price changed, discount over the cashier cap...). No sale or stock
+/// movement exists for it; the request is kept exactly as sent so it can be
+/// retried for its original cashier and time once fixed, or dismissed. Never
+/// deleted (rule 7).
+model OfflineSaleConflict {
+  id             String                @id @default(uuid()) @db.Uuid
+  /// The sale's idempotency key; a retry saves the sale under it.
+  idempotencyKey String                @unique
+  cashierId      String                @db.Uuid
+  cashier        User                  @relation("OfflineConflictCashier", fields: [cashierId], references: [id], onDelete: Restrict)
+  /// The CreateSaleBody as the device sent it, including `offline`.
+  request        Json
+  soldAt         DateTime              @db.Timestamptz(3)
+  /// What the customer was charged at the counter.
+  expectedTotal  Decimal               @db.Decimal(12, 2)
+  status         OfflineConflictStatus @default(OPEN)
+  /// The API's answer the last time the sale was tried.
+  errorCode      String
+  errorMessage   String
+  errorDetails   Json?
+  /// Tries so far: the sync that failed, then each review retry.
+  attempts       Int                   @default(1)
+  lastAttemptAt  DateTime              @default(now()) @db.Timestamptz(3)
+  saleId         String?               @unique @db.Uuid
+  sale           Sale?                 @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  resolvedById   String?               @db.Uuid
+  resolvedBy     User?                 @relation("OfflineConflictResolvedBy", fields: [resolvedById], references: [id], onDelete: Restrict)
+  resolvedAt     DateTime?             @db.Timestamptz(3)
+  dismissReason  String?
+  createdAt      DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime              @updatedAt @db.Timestamptz(3)
+
+  @@index([status, createdAt]) // review queue
+  @@index([cashierId, createdAt]) // a cashier's own
 }
 
 // ─── Audit ──────────────────────────────────────────────────────────────────
