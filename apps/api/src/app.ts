@@ -8,6 +8,7 @@ import { authRouter } from './modules/auth/auth.routes';
 import { categoriesRouter } from './modules/categories/categories.routes';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
 import { medicinesRouter } from './modules/medicines/medicines.routes';
+import { salesRouter } from './modules/sales/sales.routes';
 import { suppliersRouter } from './modules/suppliers/suppliers.routes';
 import { usersRouter } from './modules/users/users.routes';
 
@@ -35,6 +36,7 @@ export function createApp() {
   app.use('/api/suppliers', suppliersRouter);
   app.use('/api/medicines', medicinesRouter);
   app.use('/api/inventory', inventoryRouter);
+  app.use('/api/sales', salesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

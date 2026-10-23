@@ -27,6 +27,10 @@ export const notFound = (message = 'Not found') => new AppError(404, 'NOT_FOUND'
 export const conflict = (message: string, details?: unknown) =>
   new AppError(409, 'CONFLICT', message, details);
 
+/** An idempotency key was sent again with a different request, or by another user. */
+export const idempotencyKeyReused = (message: string) =>
+  new AppError(409, 'IDEMPOTENCY_KEY_REUSED', message);
+
 /** A stock-removing change asks for more than the batch has on hand (rule 3). */
 export const insufficientStock = (message: string, details?: unknown) =>
   new AppError(409, 'INSUFFICIENT_STOCK', message, details);

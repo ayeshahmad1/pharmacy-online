@@ -37,6 +37,12 @@ export const CATALOG_WRITERS = ['ADMIN', 'PHARMACIST'] as const satisfies readon
  */
 export const INVENTORY_MANAGERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
 
+/**
+ * Who may void a sale (and see every cashier's sales). Every role can sell;
+ * a CASHIER sees only their own sales.
+ */
+export const SALE_MANAGERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
+
 /** Allows the request only if the authenticated user has one of the given roles. */
 export function requireRole(...roles: RoleCode[]): RequestHandler {
   return (req, _res, next) => {

@@ -37,6 +37,9 @@ const envSchema = z.object({
     .refine(isValidTimeZone, 'Must be an IANA timezone such as Asia/Karachi'),
   /** Default window for the expiring-soon list, in days. */
   EXPIRY_WARNING_DAYS: z.coerce.number().int().min(1).max(730).default(90),
+
+  /** Largest total discount a cashier may give, as a percent of the bill subtotal. */
+  CASHIER_MAX_DISCOUNT_PERCENT: z.coerce.number().int().min(0).max(100).default(10),
 });
 
 function isValidTimeZone(tz: string): boolean {

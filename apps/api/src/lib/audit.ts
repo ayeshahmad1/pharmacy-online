@@ -26,6 +26,8 @@ export const AUDIT_ACTIONS = [
   'STOCK_RECEIVE',
   'STOCK_ADJUST',
   'STOCK_EXPIRED_WRITEOFF',
+  'SALE_CREATE',
+  'SALE_VOID',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
