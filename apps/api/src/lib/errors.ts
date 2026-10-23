@@ -26,3 +26,7 @@ export const notFound = (message = 'Not found') => new AppError(404, 'NOT_FOUND'
 
 export const conflict = (message: string, details?: unknown) =>
   new AppError(409, 'CONFLICT', message, details);
+
+/** A stock-removing change asks for more than the batch has on hand (rule 3). */
+export const insufficientStock = (message: string, details?: unknown) =>
+  new AppError(409, 'INSUFFICIENT_STOCK', message, details);

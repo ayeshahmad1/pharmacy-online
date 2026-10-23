@@ -29,7 +29,24 @@ const envSchema = z.object({
   COOKIE_SECURE: booleanString.optional(),
 
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
+
+  /** IANA timezone of the pharmacy. Decides what "today" is for expiry checks. */
+  BUSINESS_TIMEZONE: z
+    .string()
+    .default('Asia/Karachi')
+    .refine(isValidTimeZone, 'Must be an IANA timezone such as Asia/Karachi'),
+  /** Default window for the expiring-soon list, in days. */
+  EXPIRY_WARNING_DAYS: z.coerce.number().int().min(1).max(730).default(90),
 });
+
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const parsed = envSchema.safeParse(process.env);
 if (!parsed.success) {

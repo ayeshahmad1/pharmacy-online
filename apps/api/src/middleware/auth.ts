@@ -31,6 +31,12 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
 /** Who may create/edit/deactivate medicines, categories and suppliers. CASHIER is read-only. */
 export const CATALOG_WRITERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
 
+/**
+ * Who may receive, adjust and write off stock, and see inventory reports and
+ * purchase prices. CASHIER can only look up stock levels for billing.
+ */
+export const INVENTORY_MANAGERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
+
 /** Allows the request only if the authenticated user has one of the given roles. */
 export function requireRole(...roles: RoleCode[]): RequestHandler {
   return (req, _res, next) => {

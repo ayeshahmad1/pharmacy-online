@@ -23,6 +23,9 @@ export const AUDIT_ACTIONS = [
   'MEDICINE_UPDATE',
   'MEDICINE_DEACTIVATE',
   'MEDICINE_ACTIVATE',
+  'STOCK_RECEIVE',
+  'STOCK_ADJUST',
+  'STOCK_EXPIRED_WRITEOFF',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

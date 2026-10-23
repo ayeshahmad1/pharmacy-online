@@ -44,6 +44,16 @@ function toAppError(err: unknown): AppError {
     if (err.code === 'P2025') return new AppError(404, 'NOT_FOUND', 'Record not found');
   }
 
+  // Raised by the StockMovement balance trigger (see the stock_movement_guards
+  // migration) when a removal slips past the service checks. Prisma reports
+  // trigger errors only as text.
+  if (
+    err instanceof Prisma.PrismaClientUnknownRequestError &&
+    err.message.includes('would become negative')
+  ) {
+    return new AppError(409, 'INSUFFICIENT_STOCK', 'Not enough stock in the batch');
+  }
+
   // body-parser errors (malformed JSON, body too large) carry a 4xx status
   // and expose: true when the message is safe to show.
   if (isHttpError(err) && err.status < 500) {
