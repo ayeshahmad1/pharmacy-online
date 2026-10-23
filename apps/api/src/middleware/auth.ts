@@ -28,6 +28,9 @@ export const authenticate: RequestHandler = async (req, _res, next) => {
   next();
 };
 
+/** Who may create/edit/deactivate medicines, categories and suppliers. CASHIER is read-only. */
+export const CATALOG_WRITERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
+
 /** Allows the request only if the authenticated user has one of the given roles. */
 export function requireRole(...roles: RoleCode[]): RequestHandler {
   return (req, _res, next) => {

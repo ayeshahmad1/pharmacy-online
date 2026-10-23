@@ -34,17 +34,27 @@ Override with `POSTGRES_PORT` and update `DATABASE_URL` to match.
 
 `pnpm --filter api dev` starts the API on http://localhost:4000.
 
-| Endpoint                             | Who      | Notes                                                     |
-| ------------------------------------ | -------- | --------------------------------------------------------- |
-| `POST /api/auth/login`               | anyone   | `{ username, password }` → access token + user            |
-| `POST /api/auth/refresh`             | cookie   | Rotates the refresh cookie, returns a new access token    |
-| `POST /api/auth/logout`              | cookie   | Revokes the refresh token, clears the cookie              |
-| `GET /api/auth/me`                   | any user | Current user                                              |
-| `GET/POST /api/users`                | ADMIN    | List (`q`, `role`, `status`, `page`, `pageSize`) / create |
-| `GET/PATCH /api/users/:id`           | ADMIN    | Get / update name, email, role                            |
-| `POST /api/users/:id/deactivate`     | ADMIN    | Also revokes the user's sessions                          |
-| `POST /api/users/:id/activate`       | ADMIN    |                                                           |
-| `POST /api/users/:id/reset-password` | ADMIN    | `{ newPassword }`; revokes the user's sessions            |
+| Endpoint                                                    | Who               | Notes                                                                                      |
+| ----------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
+| `POST /api/auth/login`                                      | anyone            | `{ username, password }` → access token + user                                             |
+| `POST /api/auth/refresh`                                    | cookie            | Rotates the refresh cookie, returns a new access token                                     |
+| `POST /api/auth/logout`                                     | cookie            | Revokes the refresh token, clears the cookie                                               |
+| `GET /api/auth/me`                                          | any user          | Current user                                                                               |
+| `GET/POST /api/users`                                       | ADMIN             | List (`q`, `role`, `status`, `page`, `pageSize`) / create                                  |
+| `GET/PATCH /api/users/:id`                                  | ADMIN             | Get / update name, email, role                                                             |
+| `POST /api/users/:id/deactivate`                            | ADMIN             | Also revokes the user's sessions                                                           |
+| `POST /api/users/:id/activate`                              | ADMIN             |                                                                                            |
+| `POST /api/users/:id/reset-password`                        | ADMIN             | `{ newPassword }`; revokes the user's sessions                                             |
+| `GET /api/medicines`                                        | any user          | Search `q` (name or generic/salt name, ranked), `categoryId`, `status`, `page`, `pageSize` |
+| `GET /api/medicines/:id`                                    | any user          |                                                                                            |
+| `POST /api/medicines`                                       | ADMIN, PHARMACIST | `sellingPrice` is a decimal string, e.g. `"120.50"`                                        |
+| `PATCH /api/medicines/:id`                                  | ADMIN, PHARMACIST | Partial update; send `null`/`""` to clear an optional field                                |
+| `GET /api/categories`, `GET /api/suppliers`                 | any user          | `q`, `status`, `page`, `pageSize`                                                          |
+| `GET /api/categories/:id`, `GET /api/suppliers/:id`         | any user          |                                                                                            |
+| `POST /api/categories`, `POST /api/suppliers`               | ADMIN, PHARMACIST | Names are unique, ignoring case                                                            |
+| `PATCH /api/categories/:id`, `PATCH /api/suppliers/:id`     | ADMIN, PHARMACIST |                                                                                            |
+| `POST /api/{medicines,categories,suppliers}/:id/deactivate` | ADMIN, PHARMACIST | Soft: the row is kept; there is no DELETE                                                  |
+| `POST /api/{medicines,categories,suppliers}/:id/activate`   | ADMIN, PHARMACIST |                                                                                            |
 
 Send the access token as `Authorization: Bearer <token>`. The refresh token is an httpOnly cookie
 (`pharmacy_rt`, path `/api/auth`), so the browser sends it automatically to refresh/logout.

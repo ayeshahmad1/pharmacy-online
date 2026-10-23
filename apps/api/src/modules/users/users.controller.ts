@@ -6,12 +6,11 @@ import type {
   UpdateUserBody,
 } from '@pharmacy/shared';
 import type { Request, RequestHandler } from 'express';
-import { requestMeta } from '../../lib/audit';
+import { actorFrom as actor } from '../../lib/actor';
 import * as usersService from './users.service';
 
 // Routes run authenticate + validate first, so req.user is set and
 // body/query/params are already parsed by their Zod schemas.
-const actor = (req: Request): usersService.Actor => ({ id: req.user!.id, meta: requestMeta(req) });
 const params = (req: Request) => req.params as IdParams;
 
 export const list: RequestHandler = async (req, res) => {

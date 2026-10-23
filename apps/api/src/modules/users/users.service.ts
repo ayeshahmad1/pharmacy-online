@@ -6,15 +6,13 @@ import type {
   UserDto,
 } from '@pharmacy/shared';
 import type { Prisma, RecordStatus } from '@prisma/client';
-import { type RequestMeta, writeAudit } from '../../lib/audit';
+import type { Actor } from '../../lib/actor';
+import { writeAudit } from '../../lib/audit';
 import { badRequest, notFound } from '../../lib/errors';
 import { hashPassword } from '../../lib/password';
 import { prisma } from '../../lib/prisma';
 import { revokeAllRefreshTokens } from '../auth/auth.service';
 import { toUserDto, userDtoSelect } from './user.dto';
-
-/** The admin performing the action, for self-protection checks and the audit log. */
-export type Actor = { id: string; meta: RequestMeta };
 
 export async function listUsers(query: ListUsersQuery): Promise<Paginated<UserDto>> {
   const where: Prisma.UserWhereInput = {
