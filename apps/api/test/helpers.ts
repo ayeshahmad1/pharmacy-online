@@ -63,3 +63,31 @@ export async function authAs(role: RoleCode, username?: string) {
 export function auditEntries(action: string) {
   return prisma.auditLog.findMany({ where: { action }, orderBy: { createdAt: 'asc' } });
 }
+
+export function createCategory(name = 'Tablets', status: RecordStatus = 'ACTIVE') {
+  return prisma.category.create({ data: { name, status } });
+}
+
+export function createSupplier(name = 'Pak Pharma Distributors', status: RecordStatus = 'ACTIVE') {
+  return prisma.supplier.create({ data: { name, status } });
+}
+
+export function createMedicine(opts: {
+  name: string;
+  categoryId: string;
+  genericName?: string | null;
+  barcode?: string | null;
+  status?: RecordStatus;
+}) {
+  return prisma.medicine.create({
+    data: {
+      name: opts.name,
+      genericName: opts.genericName ?? null,
+      barcode: opts.barcode ?? null,
+      categoryId: opts.categoryId,
+      unit: 'tablet',
+      sellingPrice: '10.00',
+      status: opts.status ?? 'ACTIVE',
+    },
+  });
+}
