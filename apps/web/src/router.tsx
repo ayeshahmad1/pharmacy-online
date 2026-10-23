@@ -2,6 +2,12 @@ import { createBrowserRouter } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
 import { LoginPage } from '@/features/auth/login-page';
 import { HomeRedirect, RequireAuth, RequireRole } from '@/features/auth/route-guards';
+import { CategoriesPage } from '@/features/categories/categories-page';
+import { InventoryPage } from '@/features/inventory/inventory-page';
+import { ReceiveStockPage } from '@/features/inventory/receive-stock-page';
+import { MedicineDetailPage } from '@/features/medicines/medicine-detail-page';
+import { MedicinesPage } from '@/features/medicines/medicines-page';
+import { SuppliersPage } from '@/features/suppliers/suppliers-page';
 import { ADMIN_ONLY, ALL_ROLES, STAFF_ROLES } from '@/lib/navigation';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { PlaceholderPage } from '@/pages/placeholder-page';
@@ -28,9 +34,12 @@ export const router = createBrowserRouter([
             element: <RequireRole roles={STAFF_ROLES} />,
             children: [
               { path: 'dashboard', element: <PlaceholderPage title="Dashboard" session={11} /> },
-              { path: 'medicines', element: <PlaceholderPage title="Medicines" session={8} /> },
-              { path: 'inventory', element: <PlaceholderPage title="Inventory" session={8} /> },
-              { path: 'suppliers', element: <PlaceholderPage title="Suppliers" session={8} /> },
+              { path: 'medicines', element: <MedicinesPage /> },
+              { path: 'medicines/:id', element: <MedicineDetailPage /> },
+              { path: 'categories', element: <CategoriesPage /> },
+              { path: 'inventory', element: <InventoryPage /> },
+              { path: 'inventory/receive', element: <ReceiveStockPage /> },
+              { path: 'suppliers', element: <SuppliersPage /> },
               { path: 'reports', element: <PlaceholderPage title="Reports" session={11} /> },
             ],
           },

@@ -25,6 +25,7 @@ describe('role-based navigation', () => {
       '/sales',
       '/returns',
       '/medicines',
+      '/categories',
       '/inventory',
       '/suppliers',
       '/reports',

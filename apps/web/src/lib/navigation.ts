@@ -6,6 +6,7 @@ import {
   PillIcon,
   ReceiptTextIcon,
   ScanBarcodeIcon,
+  TagsIcon,
   TruckIcon,
   Undo2Icon,
   UsersIcon,
@@ -49,6 +50,7 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Stock',
     items: [
       { path: '/medicines', label: 'Medicines', icon: PillIcon, roles: STAFF_ROLES },
+      { path: '/categories', label: 'Categories', icon: TagsIcon, roles: STAFF_ROLES },
       { path: '/inventory', label: 'Inventory', icon: BoxesIcon, roles: STAFF_ROLES },
       { path: '/suppliers', label: 'Suppliers', icon: TruckIcon, roles: STAFF_ROLES },
     ],
