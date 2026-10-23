@@ -78,6 +78,17 @@ behind Nginx in production. Start the API first.
   `vite dev`; use `pnpm --filter web build && pnpm --filter web preview` to try it.
 - **UI:** shadcn/ui components live in `src/components/ui` (add more with `pnpm dlx shadcn@latest add
 <name>` from `apps/web`). Theme (light/dark/system) is stored in `localStorage`.
+- **Stock screens (admin, pharmacist):** Medicines (list, create/edit, a detail page with batches in
+  FEFO order and stock history), Categories, Suppliers, Inventory (all stock, low stock, expiring
+  soon, expired with write-off) and Inventory → Receive stock (one delivery, one line per batch).
+  Batches are adjusted from the medicine page or the expiring list. Search, filters and page live in
+  the URL, so Back and reload keep them.
+- **Forms** validate with the shared Zod schemas through `parseForm` (`src/lib/form.ts`), and API
+  field errors are mapped back onto the same fields. Money is typed and sent as strings and only
+  formatted or multiplied in exact paisa (`src/lib/money.ts`).
+- **Warnings:** expiring within 30 days is red, within 90 days amber (`src/lib/stock-status.ts`);
+  out of stock is red, at or below the reorder level amber. Expiring soon uses the API's
+  `EXPIRY_WARNING_DAYS` window unless another is picked.
 
 ## Tests
 

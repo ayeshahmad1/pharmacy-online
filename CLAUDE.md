@@ -75,6 +75,8 @@ packages/shared/src/ (zod schemas, types, constants)
 - All API calls go through `apps/web/src/lib/api.ts` (relative `/api`, same origin; Vite proxies in dev). Never store the access token in `localStorage`/`sessionStorage`. A network failure must never log the user out; only a rejected refresh does.
 - Role-based menu items live in `src/lib/navigation.ts`; route guards in `src/router.tsx` must use the same role lists.
 - The service worker uses `registerType: 'prompt'`: updates are offered, never applied mid-sale. It precaches the app shell only; offline data belongs in IndexedDB (`src/offline/`).
+- Forms validate with the shared Zod schemas via `parseForm` (`src/lib/form.ts`); map API errors back onto fields with `serverFieldErrors`. Money stays a string in forms and requests; display and arithmetic go through `src/lib/money.ts` (BigInt paisa).
+- List screens keep search, filters and page in the URL (`useListParams`) and render through `ListView` (skeleton, error with retry, no-matches, empty). Expiry/stock warning levels come from `src/lib/stock-status.ts` so every screen agrees.
 
 ## Commands
 
