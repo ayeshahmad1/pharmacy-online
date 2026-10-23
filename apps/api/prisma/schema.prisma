@@ -234,6 +234,9 @@ model Sale {
   receiptNumber  String     @unique
   /// Client-generated key so a retried or offline-synced sale is saved once.
   idempotencyKey String?    @unique
+  /// SHA-256 of the request that created the sale, so reusing an idempotency
+  /// key for a different cart is rejected instead of silently replayed.
+  requestHash    String?
   status         SaleStatus @default(COMPLETED)
   cashierId      String     @db.Uuid
   cashier        User       @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: Restrict)
@@ -262,12 +265,24 @@ model Sale {
   @@index([status, soldAt])
 }
 
+/// Per-day counter behind receipt numbers (S-YYYYMMDD-0001). The sale taking
+/// the next number keeps the row locked until it commits, so numbers are
+/// unique and gap-free within a day.
+model ReceiptCounter {
+  /// Business day in the pharmacy's timezone.
+  day        DateTime @id @db.Date
+  lastNumber Int
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+}
+
 /// One line per batch (FEFO may split one medicine across several lines).
 /// The medicine is reached through batch.medicineId.
 model SaleItem {
   id          String          @id @default(uuid()) @db.Uuid
   saleId      String          @db.Uuid
   sale        Sale            @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  /// 1-based position on the receipt: cart order, then FEFO order within a medicine.
+  lineNo      Int
   batchId     String          @db.Uuid
   batch       Batch           @relation(fields: [batchId], references: [id], onDelete: Restrict)
   quantity    Int
@@ -280,7 +295,7 @@ model SaleItem {
   movements   StockMovement[]
   returnItems ReturnItem[]
 
-  @@index([saleId])
+  @@unique([saleId, lineNo]) // also serves lookups by saleId
   @@index([batchId])
 }
 
