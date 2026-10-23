@@ -1,0 +1,23 @@
+# Local development database only. Production runs Postgres on the VPS.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: pharmacy-pos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pharmacy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pharmacy_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-pharmacy_pos}
+      TZ: Asia/Karachi
+    ports:
+      - '${POSTGRES_PORT:-5433}:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
