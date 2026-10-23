@@ -1,0 +1,343 @@
+// Pharmacy POS schema. Business rules live in CLAUDE.md; the ones enforced here:
+// - Stock is never stored as a number on Medicine or Batch. Current stock of a
+//   batch = SUM(StockMovement.quantity) for that batch (rule 5).
+// - All money is Decimal(12,2), PKR (rule 6).
+// - Nothing is hard-deleted: users/medicines/categories/suppliers use
+//   RecordStatus, sales and returns use their own status enums (rule 7).
+// - Relations use onDelete: Restrict so history can't disappear by cascade.
+// Extra CHECK constraints (sign of movement quantities, non-negative money)
+// are added by hand in the init migration, since Prisma can't express them.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // Trigram indexes make ILIKE '%term%' medicine search fast.
+  extensions = [pg_trgm]
+}
+
+// ─── Enums ──────────────────────────────────────────────────────────────────
+
+enum RoleCode {
+  ADMIN
+  PHARMACIST
+  CASHIER
+}
+
+/// Soft status for master data. INACTIVE rows are hidden from billing/pickers
+/// but kept for history.
+enum RecordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum StockMovementType {
+  PURCHASE // +qty, goods received from a supplier
+  SALE // -qty, one movement per SaleItem
+  RETURN // +qty, customer return put back into stock
+  ADJUSTMENT // ±qty, stock count correction (reason required by the service)
+  EXPIRED_WRITEOFF // -qty, removing expired stock
+}
+
+enum SaleStatus {
+  COMPLETED
+  VOIDED
+  REFUNDED
+}
+
+enum ReturnStatus {
+  COMPLETED
+  VOIDED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  MOBILE_WALLET
+}
+
+// ─── Users and roles ────────────────────────────────────────────────────────
+
+model Role {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        RoleCode @unique
+  name        String
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+}
+
+model User {
+  id           String       @id @default(uuid()) @db.Uuid
+  /// Stored lowercase; login is by username at the counter.
+  username     String       @unique
+  fullName     String
+  email        String?      @unique
+  passwordHash String
+  roleId       String       @db.Uuid
+  role         Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  status       RecordStatus @default(ACTIVE)
+  lastLoginAt  DateTime?    @db.Timestamptz(3)
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+
+  sales            Sale[]          @relation("SaleCashier")
+  voidedSales      Sale[]          @relation("SaleVoidedBy")
+  processedReturns Return[]        @relation("ReturnProcessedBy")
+  voidedReturns    Return[]        @relation("ReturnVoidedBy")
+  stockMovements   StockMovement[]
+  auditLogs        AuditLog[]
+
+  @@index([roleId])
+}
+
+// ─── Catalogue ──────────────────────────────────────────────────────────────
+
+model Category {
+  id          String       @id @default(uuid()) @db.Uuid
+  name        String       @unique
+  description String?
+  status      RecordStatus @default(ACTIVE)
+  medicines   Medicine[]
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+}
+
+model Supplier {
+  id            String       @id @default(uuid()) @db.Uuid
+  name          String       @unique
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  status        RecordStatus @default(ACTIVE)
+  batches       Batch[]
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3)
+}
+
+model Medicine {
+  id           String       @id @default(uuid()) @db.Uuid
+  name         String
+  /// Generic / salt name, e.g. "Paracetamol". Optional for non-drug items.
+  genericName  String?
+  /// Optional: some items have no barcode. Unique when present.
+  barcode      String?      @unique
+  categoryId   String       @db.Uuid
+  category     Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  /// Unit that stock quantities are counted in, e.g. "tablet", "strip", "bottle".
+  unit         String
+  /// Low-stock alert threshold, in `unit`.
+  reorderLevel Int          @default(0)
+  /// Current selling price per `unit`. SaleItem snapshots the price at sale time.
+  sellingPrice Decimal      @db.Decimal(12, 2)
+  status       RecordStatus @default(ACTIVE)
+  batches      Batch[]
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+
+  @@index([name])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Medicine_name_trgm_idx")
+  @@index([genericName(ops: raw("gin_trgm_ops"))], type: Gin, map: "Medicine_genericName_trgm_idx")
+  @@index([categoryId])
+  @@index([status])
+}
+
+// ─── Inventory ──────────────────────────────────────────────────────────────
+
+/// One received lot of a medicine. Has no "current quantity" column: stock on
+/// hand is always computed from StockMovement.
+model Batch {
+  id               String          @id @default(uuid()) @db.Uuid
+  medicineId       String          @db.Uuid
+  medicine         Medicine        @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  supplierId       String          @db.Uuid
+  supplier         Supplier        @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  batchNumber      String
+  /// Date only. A batch is expired from this date onward and is never sold.
+  expiryDate       DateTime        @db.Date
+  /// Cost per `unit` of the medicine.
+  costPrice        Decimal         @db.Decimal(12, 2)
+  /// What arrived on the delivery (informational). Must equal the PURCHASE movement.
+  quantityReceived Int
+  movements        StockMovement[]
+  saleItems        SaleItem[]
+  createdAt        DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime        @updatedAt @db.Timestamptz(3)
+
+  @@index([medicineId, expiryDate]) // FEFO: earliest-expiry batch per medicine
+  @@index([expiryDate]) // expiring-soon / expired reports
+  @@index([medicineId, batchNumber])
+  @@index([supplierId])
+}
+
+/// Append-only ledger. Rows are never updated or deleted; a mistake is fixed
+/// with a new ADJUSTMENT row.
+model StockMovement {
+  id           String            @id @default(uuid()) @db.Uuid
+  batchId      String            @db.Uuid
+  batch        Batch             @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  type         StockMovementType
+  /// Signed: positive adds stock, negative removes it. Never zero.
+  quantity     Int
+  reason       String?
+  userId       String            @db.Uuid
+  user         User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  /// Set for SALE movements.
+  saleItemId   String?           @db.Uuid
+  saleItem     SaleItem?         @relation(fields: [saleItemId], references: [id], onDelete: Restrict)
+  /// Set for RETURN movements.
+  returnItemId String?           @db.Uuid
+  returnItem   ReturnItem?       @relation(fields: [returnItemId], references: [id], onDelete: Restrict)
+  createdAt    DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@index([batchId, createdAt]) // stock per batch (SUM) and batch history
+  @@index([type, createdAt])
+  @@index([userId])
+  @@index([saleItemId])
+  @@index([returnItemId])
+}
+
+// ─── Sales ──────────────────────────────────────────────────────────────────
+
+model Sale {
+  id             String     @id @default(uuid()) @db.Uuid
+  receiptNumber  String     @unique
+  /// Client-generated key so a retried or offline-synced sale is saved once.
+  idempotencyKey String?    @unique
+  status         SaleStatus @default(COMPLETED)
+  cashierId      String     @db.Uuid
+  cashier        User       @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: Restrict)
+  subtotal       Decimal    @db.Decimal(12, 2)
+  discountTotal  Decimal    @default(0) @db.Decimal(12, 2)
+  taxTotal       Decimal    @default(0) @db.Decimal(12, 2)
+  grandTotal     Decimal    @db.Decimal(12, 2)
+  /// Cash handed back. Sum of Payment.amount always equals grandTotal.
+  changeDue      Decimal    @default(0) @db.Decimal(12, 2)
+  notes          String?
+  /// When the sale happened at the counter. Differs from createdAt for sales
+  /// made offline and synced later; reports use this.
+  soldAt         DateTime   @default(now()) @db.Timestamptz(3)
+  voidedAt       DateTime?  @db.Timestamptz(3)
+  voidedById     String?    @db.Uuid
+  voidedBy       User?      @relation("SaleVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason     String?
+  items          SaleItem[]
+  payments       Payment[]
+  returns        Return[]
+  createdAt      DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime   @updatedAt @db.Timestamptz(3)
+
+  @@index([soldAt])
+  @@index([cashierId, soldAt]) // "own sales" for cashiers
+  @@index([status, soldAt])
+}
+
+/// One line per batch (FEFO may split one medicine across several lines).
+/// The medicine is reached through batch.medicineId.
+model SaleItem {
+  id          String          @id @default(uuid()) @db.Uuid
+  saleId      String          @db.Uuid
+  sale        Sale            @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  batchId     String          @db.Uuid
+  batch       Batch           @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  quantity    Int
+  /// Selling price per unit at the time of sale.
+  unitPrice   Decimal         @db.Decimal(12, 2)
+  discount    Decimal         @default(0) @db.Decimal(12, 2)
+  tax         Decimal         @default(0) @db.Decimal(12, 2)
+  /// quantity * unitPrice - discount + tax
+  lineTotal   Decimal         @db.Decimal(12, 2)
+  movements   StockMovement[]
+  returnItems ReturnItem[]
+
+  @@index([saleId])
+  @@index([batchId])
+}
+
+/// One row per tender. Split payments are several rows on the same sale.
+model Payment {
+  id        String        @id @default(uuid()) @db.Uuid
+  saleId    String        @db.Uuid
+  sale      Sale          @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  method    PaymentMethod
+  /// Amount applied to the sale (excludes change).
+  amount    Decimal       @db.Decimal(12, 2)
+  /// Cash actually handed over, when different from amount.
+  tendered  Decimal?      @db.Decimal(12, 2)
+  /// Card approval code / wallet transaction id.
+  reference String?
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@index([saleId])
+  @@index([method, createdAt])
+}
+
+// ─── Returns ────────────────────────────────────────────────────────────────
+
+model Return {
+  id            String        @id @default(uuid()) @db.Uuid
+  returnNumber  String        @unique
+  saleId        String        @db.Uuid
+  sale          Sale          @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  status        ReturnStatus  @default(COMPLETED)
+  processedById String        @db.Uuid
+  processedBy   User          @relation("ReturnProcessedBy", fields: [processedById], references: [id], onDelete: Restrict)
+  reason        String
+  refundTotal   Decimal       @db.Decimal(12, 2)
+  refundMethod  PaymentMethod
+  voidedAt      DateTime?     @db.Timestamptz(3)
+  voidedById    String?       @db.Uuid
+  voidedBy      User?         @relation("ReturnVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  voidReason    String?
+  items         ReturnItem[]
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@index([saleId])
+  @@index([createdAt])
+  @@index([processedById])
+}
+
+/// Points at the exact SaleItem (and therefore batch) being returned, so the
+/// RETURN movement goes back to the right batch.
+model ReturnItem {
+  id           String          @id @default(uuid()) @db.Uuid
+  returnId     String          @db.Uuid
+  return       Return          @relation(fields: [returnId], references: [id], onDelete: Restrict)
+  saleItemId   String          @db.Uuid
+  saleItem     SaleItem        @relation(fields: [saleItemId], references: [id], onDelete: Restrict)
+  quantity     Int
+  refundAmount Decimal         @db.Decimal(12, 2)
+  movements    StockMovement[]
+
+  @@index([returnId])
+  @@index([saleItemId])
+}
+
+// ─── Audit ──────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  /// Null for system actions and failed logins with an unknown username.
+  userId     String?  @db.Uuid
+  user       User?    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  /// e.g. "SALE_CREATE", "MEDICINE_UPDATE", "AUTH_LOGIN"
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
