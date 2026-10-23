@@ -1,0 +1,82 @@
+# Pharmacy POS System
+
+Web-based Pharmacy POS for a single pharmacy (multi-branch ready). Handles billing, medicine inventory with batches and expiry, returns, reports, and an admin dashboard. Must keep working at the counter even when the internet drops.
+
+## Stack (do not change without asking)
+
+- Monorepo: pnpm workspaces
+  - `apps/web`: React + Vite + TypeScript, Tailwind, shadcn/ui, TanStack Query, React Router, vite-plugin-pwa, Recharts
+  - `apps/api`: Node.js + Express + TypeScript, Prisma, PostgreSQL, Zod, JWT (access + refresh), bcrypt, node-cron, pino logger
+  - `packages/shared`: Zod schemas and shared types used by both apps
+- Tests: Vitest (+ Supertest for the API)
+- Deployment target: Ubuntu VPS, Nginx reverse proxy, Let's Encrypt HTTPS, PM2
+
+## Folder structure
+
+```
+apps/
+  api/
+    prisma/schema.prisma
+    src/
+      modules/<name>/ (routes, controller, service, schema)
+      middleware/ (auth, roles, error handler, validate)
+      lib/ (prisma client, logger, config)
+      jobs/ (cron: alerts, backups)
+      server.ts
+  web/
+    src/
+      pages/ components/ features/<name>/ lib/ offline/
+packages/shared/src/ (zod schemas, types, constants)
+```
+
+## Hard business rules (never violate)
+
+1. **FEFO**: sales deduct stock from the batch with the **earliest expiry first**. A sale spanning several batches creates one sale line per batch.
+2. **No expired stock is ever sold.** Expired batches are excluded from sale and flagged in reports.
+3. **No negative stock.** A sale that exceeds available non-expired stock is rejected.
+4. **All stock-changing operations run inside a single database transaction** (sale, return, purchase receipt, adjustment). Either everything is saved or nothing.
+5. **Stock is never edited directly.** Every change is a row in `StockMovement` (type: PURCHASE, SALE, RETURN, ADJUSTMENT, EXPIRED_WRITEOFF) with user and timestamp. Current stock = sum of movements per batch.
+6. **Money** uses `Decimal(12,2)` in Postgres and string/decimal handling in code. Never use JS floats for money. Currency is PKR.
+7. **Sales and returns are never hard-deleted.** Use status fields (COMPLETED, VOIDED, REFUNDED) and keep the audit trail.
+8. **Every write action is recorded in `AuditLog`** (who, what, entity, before/after where relevant).
+9. **Roles**: ADMIN (everything), PHARMACIST (inventory, sales, returns, reports), CASHIER (billing and own sales only). Enforce on the **server**, never only in the UI.
+10. Medicines have: name, generic/salt name, barcode, category, unit, reorder level, selling price. Batches have: batch number, expiry date, cost price, quantity received, supplier.
+
+## Architecture rules
+
+- The browser/client **only talks to the API over HTTPS**. Never connect a client directly to the database.
+- Validate every request body, query, and param with Zod schemas from `packages/shared`.
+- Controllers stay thin; business logic lives in services; services are unit-tested.
+- Consistent API error shape: `{ error: { code, message, details? } }`.
+- Never log passwords, tokens, or secrets. Secrets come from environment variables only; commit `.env.example`, never `.env`.
+- Add database indexes for barcode, medicine name search, batch expiry, and sale date.
+
+## Frontend rules
+
+- The billing screen must be **keyboard-first**: autofocus on barcode/search, Enter to add, shortcuts for pay/hold/clear. Medicine search must feel instant.
+- Billing must keep working offline: queue completed sales in IndexedDB and sync when back online, with idempotency keys so a sale is never saved twice.
+- Large touch-friendly controls, clear empty/loading/error states, dark mode support.
+
+## Commands
+
+- `pnpm install`
+- `pnpm dev` (runs api + web)
+- `pnpm --filter api prisma migrate dev`
+- `pnpm test` (all tests), `pnpm lint`, `pnpm typecheck`
+
+## Workflow rules for Claude
+
+- Work on **one session goal at a time** (see SESSIONS.md). Do not build things from later sessions.
+- Before coding a session: restate the plan briefly, then implement.
+- After coding: run typecheck, lint, and tests, fix failures, then summarize what changed and what to test manually.
+- Write tests for all stock, billing, and returns logic.
+- If a business rule is unclear, **ask** instead of guessing.
+- Small, focused commits with clear messages after each working step.
+- Keep this file updated if a decision changes the stack or rules.
+
+## Definition of done (every session)
+
+- Typecheck, lint, and tests pass
+- New logic has tests where it touches stock, money, or permissions
+- No secrets committed, `.env.example` updated if new variables were added
+- Short summary of what was built and how to verify it manually
