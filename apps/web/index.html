@@ -2,8 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Point of sale and inventory for the pharmacy counter" />
+    <meta name="theme-color" content="#0f766e" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>Pharmacy POS</title>
+    <script>
+      // Apply the saved theme before first paint so dark mode does not flash.
+      // Keep the key in sync with src/components/theme-provider.tsx.
+      (function () {
+        var theme = 'system';
+        try {
+          theme = localStorage.getItem('pharmacy-theme') || 'system';
+        } catch (e) {}
+        var dark =
+          theme === 'dark' ||
+          (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.classList.add('dark');
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
