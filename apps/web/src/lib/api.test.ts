@@ -177,4 +177,28 @@ describe('api client', () => {
     expect(bearer(fetchMock.mock.calls[3]![1])).toBeNull();
     expect(events).toEqual([{ type: 'ended', reason: 'logout' }]);
   });
+
+  it('downloads files with auth, refreshing once on 401', async () => {
+    setAccessToken('tok-old');
+    const fetchMock = mockFetch((url, init) => {
+      if (url === '/api/auth/refresh') return json(200, auth('tok-new'));
+      if (bearer(init) !== 'Bearer tok-new') return unauthorized();
+      return new Response('a,b', {
+        status: 200,
+        headers: { 'Content-Disposition': 'attachment; filename="sales-2026.csv"' },
+      });
+    });
+
+    const { blob, filename } = await api.download('/reports/sales', { format: 'csv' });
+
+    expect(filename).toBe('sales-2026.csv');
+    expect(await blob.text()).toBe('a,b');
+    expect(fetchMock.mock.calls.at(-1)![0]).toBe('/api/reports/sales?format=csv');
+  });
+
+  it('turns a failed download into an ApiError', async () => {
+    setAccessToken('tok');
+    mockFetch(() => json(403, { error: { code: 'FORBIDDEN', message: 'No' } }));
+    await expect(api.download('/reports/sales')).rejects.toBeInstanceOf(ApiError);
+  });
 });

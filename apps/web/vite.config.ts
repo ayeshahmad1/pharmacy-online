@@ -61,6 +61,10 @@ export default defineConfig(({ mode }) => {
               return 'react';
             }
             if (/node_modules[\\/]zod[\\/]/.test(id)) return 'zod';
+            // Only the dashboard and reports draw charts; the counter never loads them.
+            if (/node_modules[\\/](recharts|d3-[^\\/]+|victory-vendor)[\\/]/.test(id)) {
+              return 'charts';
+            }
             return 'vendor';
           },
         },

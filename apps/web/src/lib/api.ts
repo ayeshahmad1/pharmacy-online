@@ -182,12 +182,33 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return parse<T>(res);
 }
 
+/**
+ * Fetches a file (e.g. a report's CSV export) with the same auth and refresh
+ * handling as JSON requests. The name comes from Content-Disposition.
+ */
+export async function apiDownload(
+  path: string,
+  query?: Query,
+): Promise<{ blob: Blob; filename: string }> {
+  const tokenUsed = accessToken;
+  let res = await send(path, { query });
+  if (res.status === 401 && (tokenUsed || restorable)) {
+    if (accessToken === tokenUsed) await refreshSession();
+    res = await send(path, { query });
+  }
+  if (!res.ok) await parse(res);
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? 'export.csv';
+  return { blob: await res.blob(), filename };
+}
+
 export const api = {
   get: <T>(path: string, query?: Query, signal?: AbortSignal) =>
     apiRequest<T>(path, { query, signal }),
   post: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'POST', body }),
   patch: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
+  download: apiDownload,
 };
 
 export async function login(username: string, password: string): Promise<AuthResponse> {

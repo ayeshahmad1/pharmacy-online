@@ -23,6 +23,7 @@ describe('money helpers', () => {
     expect(formatMoney('1234567.5')).toBe('Rs 1,234,567.50');
     expect(formatMoney('0')).toBe('Rs 0.00');
     expect(formatMoney(-123456n)).toBe('-Rs 1,234.56');
+    expect(formatMoney('-25.5')).toBe('-Rs 25.50');
     expect(formatMoney('oops')).toBe('oops');
   });
 

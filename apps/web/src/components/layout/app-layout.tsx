@@ -4,6 +4,7 @@ import { Outlet, useLocation } from 'react-router';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { AlertsBell } from '@/features/alerts/alerts-bell';
 import { useCurrentUser } from '@/features/auth/auth-context';
 import { findNavItem, navLabel } from '@/lib/navigation';
 import { OfflineProvider } from '@/offline/offline-provider';
@@ -49,6 +50,7 @@ export function AppLayout() {
             </h1>
             <div className="ml-auto flex items-center gap-1">
               <ConnectionStatus />
+              <AlertsBell />
               <ThemeToggle />
               <UserMenu />
             </div>

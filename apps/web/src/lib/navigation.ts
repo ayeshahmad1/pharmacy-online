@@ -1,6 +1,7 @@
 import { ROLE_CODES, type RoleCode } from '@pharmacy/shared';
 import {
   BarChart3Icon,
+  BellIcon,
   BoxesIcon,
   CloudOffIcon,
   LayoutDashboardIcon,
@@ -61,6 +62,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { path: '/categories', label: 'Categories', icon: TagsIcon, roles: STAFF_ROLES },
       { path: '/inventory', label: 'Inventory', icon: BoxesIcon, roles: STAFF_ROLES },
       { path: '/suppliers', label: 'Suppliers', icon: TruckIcon, roles: STAFF_ROLES },
+      // Everyone sees low-stock and expiry alerts; only staff mark them seen.
+      { path: '/alerts', label: 'Alerts', icon: BellIcon, roles: ALL_ROLES },
     ],
   },
   {

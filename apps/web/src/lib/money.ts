@@ -20,9 +20,17 @@ export function paisaToAmount(paisa: bigint): string {
   return `${sign}${abs / 100n}.${(abs % 100n).toString().padStart(2, '0')}`;
 }
 
-/** "1234567.5" → "Rs 1,234,567.50". Shows unparseable input unchanged. */
+/** Like toPaisa, but also takes a negative amount such as a loss ("-25.00"). */
+export function toSignedPaisa(amount: string): bigint | null {
+  const text = amount.trim();
+  if (!text.startsWith('-')) return toPaisa(text);
+  const paisa = toPaisa(text.slice(1));
+  return paisa === null ? null : -paisa;
+}
+
+/** "1234567.5" → "Rs 1,234,567.50", "-25" → "-Rs 25.00". Shows unparseable input unchanged. */
 export function formatMoney(amount: string | bigint): string {
-  const paisa = typeof amount === 'bigint' ? amount : toPaisa(amount);
+  const paisa = typeof amount === 'bigint' ? amount : toSignedPaisa(amount);
   if (paisa === null) return String(amount);
   const [whole, fraction] = paisaToAmount(paisa).split('.');
   const sign = whole!.startsWith('-') ? '-' : '';

@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
+import { AlertsPage } from '@/features/alerts/alerts-page';
 import { LoginPage } from '@/features/auth/login-page';
 import { HomeRedirect, RequireAuth, RequireRole } from '@/features/auth/route-guards';
 import { BillingPage } from '@/features/billing/billing-page';
@@ -31,19 +32,31 @@ export const router = createBrowserRouter([
               { path: 'sales', element: <PlaceholderPage title="Sales" /> },
               { path: 'returns', element: <PlaceholderPage title="Returns" /> },
               { path: 'offline-sales', element: <OfflineSalesPage /> },
+              { path: 'alerts', element: <AlertsPage /> },
             ],
           },
           {
             element: <RequireRole roles={STAFF_ROLES} />,
             children: [
-              { path: 'dashboard', element: <PlaceholderPage title="Dashboard" session={11} /> },
+              // Charts are code-split: billing devices never download them.
+              {
+                path: 'dashboard',
+                lazy: async () => ({
+                  Component: (await import('@/features/dashboard/dashboard-page')).DashboardPage,
+                }),
+              },
               { path: 'medicines', element: <MedicinesPage /> },
               { path: 'medicines/:id', element: <MedicineDetailPage /> },
               { path: 'categories', element: <CategoriesPage /> },
               { path: 'inventory', element: <InventoryPage /> },
               { path: 'inventory/receive', element: <ReceiveStockPage /> },
               { path: 'suppliers', element: <SuppliersPage /> },
-              { path: 'reports', element: <PlaceholderPage title="Reports" session={11} /> },
+              {
+                path: 'reports',
+                lazy: async () => ({
+                  Component: (await import('@/features/reports/reports-page')).ReportsPage,
+                }),
+              },
             ],
           },
           {

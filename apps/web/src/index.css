@@ -31,6 +31,12 @@
   --sidebar-accent: oklch(0.953 0.051 180.801);
   --sidebar-accent-foreground: oklch(0.386 0.063 188.416);
   --sidebar-border: oklch(0.922 0 0);
+  /* Charts: two validated series hues (blue, orange) and recessive chrome. */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-grid: #e1e0d9;
+  --chart-axis: #c3c2b7;
+  --chart-muted: #898781;
 }
 
 .dark {
@@ -59,6 +65,11 @@
   --sidebar-accent: oklch(0.277 0.046 192.524);
   --sidebar-accent-foreground: oklch(0.91 0.096 180.426);
   --sidebar-border: oklch(1 0 0 / 10%);
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-grid: #2c2c2a;
+  --chart-axis: #383835;
+  --chart-muted: #898781;
 }
 
 @theme inline {
