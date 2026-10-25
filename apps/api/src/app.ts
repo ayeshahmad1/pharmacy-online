@@ -32,6 +32,11 @@ export function createApp() {
   app.use(express.json({ limit: '100kb' }));
   app.use(cookieParser());
 
+  // Connectivity probe for offline billing: answers as soon as the API is up,
+  // without touching the database or needing a session.
+  app.get('/api/ping', (_req, res) => {
+    res.set('Cache-Control', 'no-store').status(204).end();
+  });
   app.use('/api/auth', authRouter);
   app.use('/api/users', usersRouter);
   app.use('/api/categories', categoriesRouter);

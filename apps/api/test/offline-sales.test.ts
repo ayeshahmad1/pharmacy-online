@@ -77,6 +77,14 @@ const dismiss = (auth: string, id: string, reason = 'Recorded by hand in the led
     .set('Authorization', auth)
     .send({ reason });
 
+describe('GET /api/ping', () => {
+  it('answers without a session so the counter can tell it is back online', async () => {
+    const res = await request(app).get('/api/ping');
+    expect(res.status).toBe(204);
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+});
+
 describe('GET /api/inventory/offline-catalogue', () => {
   it('lists active medicines with every batch that has stock, earliest expiry first', async () => {
     const ctx = await salesSetup();
