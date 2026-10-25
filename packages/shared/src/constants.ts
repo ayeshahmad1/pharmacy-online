@@ -29,3 +29,9 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const OFFLINE_CONFLICT_STATUSES = ['OPEN', 'RESOLVED', 'DISMISSED'] as const;
 export type OfflineConflictStatus = (typeof OFFLINE_CONFLICT_STATUSES)[number];
+
+export const ALERT_TYPES = ['OUT_OF_STOCK', 'LOW_STOCK', 'EXPIRING_SOON', 'EXPIRED'] as const;
+export type AlertType = (typeof ALERT_TYPES)[number];
+
+export const ALERT_SEVERITIES = ['WARNING', 'CRITICAL'] as const;
+export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];

@@ -10,3 +10,5 @@ export * from './schemas/inventory';
 export * from './schemas/sales';
 export * from './schemas/returns';
 export * from './schemas/offline-sales';
+export * from './schemas/reports';
+export * from './schemas/alerts';
