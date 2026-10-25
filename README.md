@@ -69,7 +69,7 @@ behind Nginx in production. Start the API first.
   cookie. A 401 triggers one shared refresh and a retry. Refreshes are serialised across tabs with a
   Web Lock, because the server treats a reused refresh token as theft. Logging out in one tab logs out
   the others.
-- **Roles:** cashiers land on Billing and see only Billing, My sales, Returns and My offline sales. Pharmacists see
+- **Roles:** cashiers land on Billing and see only Billing, My sales, Returns, My offline sales and Alerts. Pharmacists see
   everything except Users. The menu lives in `apps/web/src/lib/navigation.ts`, and route guards in
   `src/router.tsx` use the same role lists. The API enforces the real rules.
 - **PWA:** `pnpm --filter web build` emits a manifest and a Workbox service worker that precaches
@@ -118,6 +118,22 @@ behind Nginx in production. Start the API first.
   automatically after each sale if ticked on that device). Set the printer's paper to the 80mm roll.
   Header and footer come from `VITE_PHARMACY_NAME`, `VITE_PHARMACY_ADDRESS`, `VITE_PHARMACY_PHONE`
   and `VITE_RECEIPT_FOOTER` in `apps/web/.env`.
+- **Dashboard and reports (admin, pharmacist):** the dashboard shows today against yesterday, the
+  month so far, the last 30 days (revenue and gross profit), best sellers, today's payment mix and
+  what needs attention. **Reports** has tabs for sales by day/week/month, profit and margin per
+  medicine, best sellers, cashiers, the daily cash closing, low stock (with the 30-day sales pace),
+  expiry (bucketed and valued), dead stock and supplier purchases. Date ranges and filters live in
+  the URL; **Export CSV** downloads every row (`?format=csv` on the same endpoint). Rules: sales count
+  on the day they were rung up (offline sales on their counter time), voided sales are left out, a
+  refund comes off the day of the original sale, and cost is the batch cost of what sold less units
+  returned to the shelf. Cash closing follows the drawer instead: every sale rung up that day, less
+  voids and refunds paid back that day. Charts and report pages are code-split, so billing devices
+  never download them.
+- **Alerts (every role sees them):** the API's alerts job (`ALERTS_CRON`, every 15 minutes and at
+  startup) opens an alert per out-of-stock or low-stock medicine and per batch expiring within
+  `ALERT_EXPIRY_DAYS` (default 30) or expired with stock on the shelf, and resolves it by itself once
+  dealt with. The bell in the header counts unread alerts; a pharmacist or admin marks them seen
+  (for everyone) or runs **Check now** on the Alerts page.
 - **Warnings:** expiring within 30 days is red, within 90 days amber (`src/lib/stock-status.ts`);
   out of stock is red, at or below the reorder level amber. Expiring soon uses the API's
   `EXPIRY_WARNING_DAYS` window unless another is picked.
