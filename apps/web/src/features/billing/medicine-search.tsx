@@ -68,12 +68,15 @@ export function MedicineSearch({
     enabled: debouncedTerm.length > 0 && !substitutesFor,
     placeholderData: keepPreviousData,
     staleTime: SEARCH_STALE_MS,
+    // Answered from this device's medicine list when offline, so never paused.
+    networkMode: 'always',
   });
   const substitutes = useQuery({
     queryKey: billingKeys.substitutes(substitutesFor?.id ?? ''),
     queryFn: ({ signal }) => billingApi.substitutes(substitutesFor!.id, signal),
     enabled: !!substitutesFor,
     staleTime: SEARCH_STALE_MS,
+    networkMode: 'always',
   });
 
   const items: SellableMedicineDto[] = substitutesFor
@@ -134,6 +137,7 @@ export function MedicineSearch({
         queryKey: billingKeys.search(term),
         queryFn: ({ signal }) => billingApi.search(term, signal),
         staleTime: SEARCH_STALE_MS,
+        networkMode: 'always',
       });
       const exact =
         results.find((m) => m.barcodeMatch) ?? (results.length === 1 ? results[0] : undefined);

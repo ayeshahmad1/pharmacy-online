@@ -1,6 +1,6 @@
-import type { CreateSaleBody, PaymentInput, SaleDto, SellableMedicineDto } from '@pharmacy/shared';
+import type { PaymentInput, SaleDto, SellableMedicineDto } from '@pharmacy/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { OctagonAlertIcon, XIcon } from 'lucide-react';
+import { CloudOffIcon, OctagonAlertIcon, XIcon } from 'lucide-react';
 import {
   useEffect,
   useEffectEvent,
@@ -13,10 +13,15 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/features/auth/auth-context';
 import { invalidateStock } from '@/features/inventory/inventory-api';
-import { errorMessage } from '@/lib/api';
-import { formatQuantity } from '@/lib/format';
+import { errorMessage, isUnreachable } from '@/lib/api';
+import { connectivity } from '@/lib/connectivity';
+import { formatDateTime, formatQuantity } from '@/lib/format';
 import { paisaToAmount } from '@/lib/money';
+import { cn } from '@/lib/utils';
+import { offlineBilling } from '@/offline/catalogue-store';
 import { drafts, heldBills, type HeldBill } from '@/offline/held-bills';
+import { useOffline } from '@/offline/offline-context';
+import { newQueuedSale, saleQueue } from '@/offline/sale-queue';
 import { ClearBillDialog, HeldBillsDialog, HoldDialog, SaleCompleteDialog } from './bill-dialogs';
 import { billingApi, billingKeys } from './billing-api';
 import {
@@ -38,6 +43,7 @@ import { CartKeysHint, CartList, focusQuantity } from './cart-list';
 import { DiscountDialog, type DiscountTarget } from './discount-dialog';
 import { errorBeep } from './feedback';
 import { MedicineSearch } from './medicine-search';
+import { buildOfflineSale, checkOfflineSale } from './offline-sale';
 import { PayDialog } from './pay-dialog';
 import { saleProblem, type SaleProblem } from './sale-errors';
 import { TotalsPanel } from './totals-panel';
@@ -59,7 +65,18 @@ type DialogState =
   | { type: 'hold' }
   | { type: 'held' }
   | { type: 'clear' }
-  | { type: 'done'; sale: SaleDto; replayed: boolean };
+  | { type: 'done'; sale: SaleDto; replayed: boolean; provisional: boolean };
+
+/** The sale went to the server, or was queued on this device to sync later. */
+type SellResult =
+  { kind: 'saved'; sale: SaleDto; replayed: boolean } | { kind: 'queued'; sale: SaleDto };
+
+/** This device can't vouch for the sale offline; nothing was queued. */
+class OfflineSaleRefused extends Error {
+  constructor(readonly problem: SaleProblem) {
+    super(problem.message);
+  }
+}
 
 /** How long the cart may go unsaved on this device after a change. */
 const DRAFT_SAVE_DELAY_MS = 250;
@@ -73,10 +90,15 @@ const DRAFT_SAVE_DELAY_MS = 250;
  *
  * The cart is saved on this device as it changes, so a reload, a dropped
  * session or a visit to another screen doesn't lose it.
+ *
+ * Offline (or when the server stops answering mid-sale), lookups come from
+ * the medicine list saved on this device and a paid bill is queued there,
+ * under its own idempotency key, to sync when the connection returns.
  */
 export function BillingPage() {
   const user = useCurrentUser();
   const queryClient = useQueryClient();
+  const offline = useOffline();
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [cart, setCart] = useState<Cart>(newCart);
@@ -285,20 +307,65 @@ export function BillingPage() {
 
   // ─── Payment ──────────────────────────────────────────────────────────────
 
+  /**
+   * Queues the bill on this device, if the device's own stock count and the
+   * cashier cap allow it. Same idempotency key as any online attempt, so a
+   * sale the server did save (reply lost) replays instead of doubling.
+   */
+  async function queueOffline(payments: PaymentInput[]): Promise<SaleDto> {
+    const local = await offlineBilling.forSale(cart.lines.map((l) => l.medicine.id));
+    const problem = checkOfflineSale(cart, totals, {
+      stock: local?.stock ?? new Map<string, SellableMedicineDto>(),
+      cashierMaxDiscountPercent: local?.meta.cashierMaxDiscountPercent ?? null,
+      role: user.role,
+    });
+    if (problem || !local) throw new OfflineSaleRefused(problem!);
+    const { body, receipt } = buildOfflineSale({
+      cart,
+      totals,
+      payments,
+      user,
+      batches: local.batches,
+      today: local.today,
+      now: new Date(),
+    });
+    await saleQueue.put(newQueuedSale({ body, receipt, user }));
+    return receipt;
+  }
+
   const sell = useMutation({
-    mutationFn: (body: CreateSaleBody) => billingApi.createSale(body),
+    mutationFn: async (payments: PaymentInput[]): Promise<SellResult> => {
+      if (connectivity.get().online) {
+        try {
+          return { kind: 'saved', ...(await billingApi.createSale(toSaleBody(cart, payments))) };
+        } catch (err) {
+          // The server never answered: the sale may or may not be saved there.
+          // Queue it under the same key; the sync replays or saves it.
+          if (!isUnreachable(err)) throw err;
+        }
+      }
+      return { kind: 'queued', sale: await queueOffline(payments) };
+    },
+    // Runs offline too: that is when queueing matters.
+    networkMode: 'always',
     meta: { skipErrorToast: true },
-    onSuccess: ({ sale, replayed }) => {
+    onSuccess: (result) => {
       resetBill();
-      setDialog({ type: 'done', sale, replayed });
+      setDialog({
+        type: 'done',
+        sale: result.sale,
+        replayed: result.kind === 'saved' && result.replayed,
+        provisional: result.kind === 'queued',
+      });
       drafts.clear(user.id).catch(() => undefined);
       // Stock just changed: search results and stock screens must not show the old numbers.
       void queryClient.invalidateQueries({ queryKey: billingKeys.all });
-      void invalidateStock(queryClient);
+      if (result.kind === 'saved') void invalidateStock(queryClient);
+      else offline.syncNow();
     },
     onError: (err) => {
       errorBeep();
-      const p = saleProblem(err, cart);
+      const p = err instanceof OfflineSaleRefused ? err.problem : saleProblem(err, cart);
       if (p.stockUpdates.length > 0) {
         const updates = new Map(p.stockUpdates.map((u) => [u.medicineId, u]));
         setCart((c) => ({
@@ -354,7 +421,7 @@ export function BillingPage() {
 
   function pay(payments: PaymentInput[]) {
     setPayError(null);
-    sell.mutate(toSaleBody(cart, payments));
+    sell.mutate(payments);
   }
 
   // ─── Hold and resume ──────────────────────────────────────────────────────
@@ -491,6 +558,32 @@ export function BillingPage() {
           onIdleKey={onIdleKey}
         />
 
+        {!offline.online && (
+          <div
+            role="status"
+            className={cn(
+              'flex items-start gap-3 rounded-lg border p-3 text-sm',
+              offline.catalogue
+                ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200'
+                : 'border-destructive/30 bg-destructive/10 text-destructive',
+            )}
+          >
+            <CloudOffIcon className="mt-0.5 size-5 shrink-0" />
+            {offline.catalogue ? (
+              <p>
+                <span className="font-medium">Offline.</span> Keep billing: sales are saved on this
+                device and sync when the connection returns. Stock is as of{' '}
+                {formatDateTime(offline.catalogue.generatedAt)}, less sales made here.
+              </p>
+            ) : (
+              <p>
+                <span className="font-medium">Offline, and no medicine list is saved here.</span>{' '}
+                Sales can’t be made until the connection returns.
+              </p>
+            )}
+          </div>
+        )}
+
         {problem?.message && (
           <div
             role="alert"
@@ -610,6 +703,7 @@ export function BillingPage() {
         <SaleCompleteDialog
           sale={dialog.sale}
           replayed={dialog.replayed}
+          provisional={dialog.provisional}
           onNewSale={() => setDialog(null)}
           onCloseAutoFocus={returnFocus}
         />

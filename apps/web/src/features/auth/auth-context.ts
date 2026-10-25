@@ -4,7 +4,16 @@ import { createContext, useContext } from 'react';
 export type AuthState =
   | { status: 'loading'; user: null }
   | { status: 'anonymous'; user: null }
-  | { status: 'authenticated'; user: UserDto };
+  | {
+      status: 'authenticated';
+      user: UserDto;
+      /**
+       * Resumed after a reload while the server was unreachable, from the
+       * user remembered on this device. No access token yet: the session is
+       * confirmed (or ended) as soon as the server answers.
+       */
+      resumedOffline?: boolean;
+    };
 
 export type AuthContextValue = AuthState & {
   login: (username: string, password: string) => Promise<UserDto>;

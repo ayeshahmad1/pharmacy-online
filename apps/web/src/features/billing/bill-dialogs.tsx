@@ -1,5 +1,5 @@
 import type { SaleDto } from '@pharmacy/shared';
-import { CircleCheckIcon, PauseIcon, PrinterIcon, Trash2Icon } from 'lucide-react';
+import { CircleCheckIcon, CloudOffIcon, PauseIcon, PrinterIcon, Trash2Icon } from 'lucide-react';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,14 +36,22 @@ function readAutoPrint() {
 
 /**
  * The saved sale: change to hand back, the receipt as it will print, and the
- * way to the next customer. P prints; Enter or Esc starts a new sale.
+ * way to the next customer. P prints; Enter or Esc starts a new sale. A sale
+ * made offline (`provisional`) is shown as saved on this device, with its
+ * offline reference until the server numbers it.
  */
 export function SaleCompleteDialog({
   sale,
   replayed,
+  provisional = false,
   onNewSale,
   onCloseAutoFocus,
-}: { sale: SaleDto; replayed: boolean; onNewSale: () => void } & CloseFocus) {
+}: {
+  sale: SaleDto;
+  replayed: boolean;
+  provisional?: boolean;
+  onNewSale: () => void;
+} & CloseFocus) {
   // A per-device preference, so it lives in localStorage rather than the database.
   const [autoPrint, setAutoPrint] = useState(readAutoPrint);
 
@@ -80,16 +88,22 @@ export function SaleCompleteDialog({
         onKeyDown={onKeyDown}
         onCloseAutoFocus={onCloseAutoFocus}
       >
-        <ReceiptPrintArea sale={sale} />
+        <ReceiptPrintArea sale={sale} provisional={provisional} />
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <CircleCheckIcon className="size-6 text-emerald-600" />
-            Sale saved · {sale.receiptNumber}
+            {provisional ? (
+              <CloudOffIcon className="size-6 text-amber-600" />
+            ) : (
+              <CircleCheckIcon className="size-6 text-emerald-600" />
+            )}
+            {provisional ? 'Saved offline' : 'Sale saved'} · {sale.receiptNumber}
           </DialogTitle>
           <DialogDescription>
-            {replayed
-              ? 'This bill had already been saved by an earlier attempt; this is that sale. Nothing was charged twice.'
-              : `${formatDateTime(sale.soldAt)} · ${sale.cashier.fullName}`}
+            {provisional
+              ? 'Kept on this device and sent to the server automatically when the connection returns; the receipt number is assigned then.'
+              : replayed
+                ? 'This bill had already been saved by an earlier attempt; this is that sale. Nothing was charged twice.'
+                : `${formatDateTime(sale.soldAt)} · ${sale.cashier.fullName}`}
           </DialogDescription>
         </DialogHeader>
 
@@ -120,7 +134,7 @@ export function SaleCompleteDialog({
           </div>
           {/* The receipt at its printed width (80mm ≈ 302px), on white like the paper. */}
           <div className="max-h-[50svh] overflow-y-auto rounded-md border bg-white p-3 shadow-inner sm:w-[302px]">
-            <Receipt sale={sale} />
+            <Receipt sale={sale} provisional={provisional} />
           </div>
         </div>
 
