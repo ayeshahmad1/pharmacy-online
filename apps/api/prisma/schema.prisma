@@ -74,6 +74,18 @@ enum OfflineConflictStatus {
   DISMISSED
 }
 
+enum AlertType {
+  OUT_OF_STOCK // medicine: no sellable stock left
+  LOW_STOCK // medicine: sellable stock at or below its reorder level
+  EXPIRING_SOON // batch with stock expiring within ALERT_EXPIRY_DAYS
+  EXPIRED // batch past its expiry date with stock still on the shelf
+}
+
+enum AlertSeverity {
+  WARNING
+  CRITICAL
+}
+
 // ─── Users and roles ────────────────────────────────────────────────────────
 
 model Role {
@@ -100,16 +112,17 @@ model User {
   createdAt    DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
 
-  sales            Sale[]                @relation("SaleCashier")
-  voidedSales      Sale[]                @relation("SaleVoidedBy")
-  requestedReturns Return[]              @relation("ReturnRequestedBy")
-  reviewedReturns  Return[]              @relation("ReturnReviewedBy")
-  voidedReturns    Return[]              @relation("ReturnVoidedBy")
-  stockMovements   StockMovement[]
-  auditLogs        AuditLog[]
-  refreshTokens    RefreshToken[]
-  offlineConflicts OfflineSaleConflict[] @relation("OfflineConflictCashier")
-  resolvedOffline  OfflineSaleConflict[] @relation("OfflineConflictResolvedBy")
+  sales              Sale[]                @relation("SaleCashier")
+  voidedSales        Sale[]                @relation("SaleVoidedBy")
+  requestedReturns   Return[]              @relation("ReturnRequestedBy")
+  reviewedReturns    Return[]              @relation("ReturnReviewedBy")
+  voidedReturns      Return[]              @relation("ReturnVoidedBy")
+  stockMovements     StockMovement[]
+  auditLogs          AuditLog[]
+  refreshTokens      RefreshToken[]
+  offlineConflicts   OfflineSaleConflict[] @relation("OfflineConflictCashier")
+  resolvedOffline    OfflineSaleConflict[] @relation("OfflineConflictResolvedBy")
+  acknowledgedAlerts Alert[]
 
   @@index([roleId])
 }
@@ -179,6 +192,7 @@ model Medicine {
   sellingPrice Decimal      @db.Decimal(12, 2)
   status       RecordStatus @default(ACTIVE)
   batches      Batch[]
+  alerts       Alert[]
   createdAt    DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
 
@@ -208,6 +222,7 @@ model Batch {
   quantityReceived Int
   movements        StockMovement[]
   saleItems        SaleItem[]
+  alerts           Alert[]
   createdAt        DateTime        @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime        @updatedAt @db.Timestamptz(3)
 
@@ -282,6 +297,7 @@ model Sale {
   @@index([soldAt])
   @@index([cashierId, soldAt]) // "own sales" for cashiers
   @@index([status, soldAt])
+  @@index([voidedAt]) // voids by day (cash closing)
 }
 
 /// Per-day counters behind document numbers: sale receipts (S-YYYYMMDD-0001)
@@ -452,6 +468,41 @@ model OfflineSaleConflict {
 
   @@index([status, createdAt]) // review queue
   @@index([cashierId, createdAt]) // a cashier's own
+}
+
+// ─── Alerts ─────────────────────────────────────────────────────────────────
+
+/// Raised and kept up to date by the alerts job (src/jobs/alerts.job.ts).
+/// There is at most one unresolved alert per condition: `openKey` is set
+/// while the alert is unresolved and cleared when it resolves, and is unique.
+/// An alert resolves by itself once its condition is gone (restocked, sold
+/// through, written off); acknowledging it only takes it off the badge.
+/// Never deleted.
+model Alert {
+  id               String        @id @default(uuid()) @db.Uuid
+  type             AlertType
+  severity         AlertSeverity
+  /// "<type>:<medicineId>" for stock alerts, "<type>:<batchId>" for expiry alerts. Null once resolved.
+  openKey          String?       @unique
+  medicineId       String        @db.Uuid
+  medicine         Medicine      @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  /// Set for expiry alerts.
+  batchId          String?       @db.Uuid
+  batch            Batch?        @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  message          String
+  /// The numbers behind the message at the last refresh (quantity, reorder level, expiry date).
+  details          Json
+  acknowledgedAt   DateTime?     @db.Timestamptz(3)
+  acknowledgedById String?       @db.Uuid
+  acknowledgedBy   User?         @relation(fields: [acknowledgedById], references: [id], onDelete: Restrict)
+  resolvedAt       DateTime?     @db.Timestamptz(3)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@index([resolvedAt, acknowledgedAt]) // badge: unresolved and unacknowledged
+  @@index([createdAt])
+  @@index([medicineId])
+  @@index([batchId])
 }
 
 // ─── Audit ──────────────────────────────────────────────────────────────────
