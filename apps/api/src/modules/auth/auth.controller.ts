@@ -6,7 +6,15 @@ import { AppError } from '../../lib/errors';
 import * as usersService from '../users/users.service';
 import * as authService from './auth.service';
 
-export const REFRESH_COOKIE = 'pharmacy_rt';
+/**
+ * Over HTTPS the name carries the __Secure- prefix, so browsers refuse the
+ * cookie unless it is Secure and set by an HTTPS response: a plain-HTTP page
+ * on the same domain cannot plant or overwrite it.
+ */
+export const refreshCookieName = (secure: boolean) =>
+  secure ? '__Secure-pharmacy_rt' : 'pharmacy_rt';
+
+export const REFRESH_COOKIE = refreshCookieName(config.COOKIE_SECURE);
 
 // httpOnly keeps the refresh token away from page scripts; the path limits it
 // to the auth endpoints; SameSite=Strict blocks cross-site refresh/logout.
@@ -15,6 +23,7 @@ const refreshCookieOptions: CookieOptions = {
   secure: config.COOKIE_SECURE,
   sameSite: 'strict',
   path: '/api/auth',
+  priority: 'high',
 };
 
 function sendAuthResult(res: Response, result: authService.AuthResult) {

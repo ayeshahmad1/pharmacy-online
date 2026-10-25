@@ -16,6 +16,9 @@ export default defineConfig({
       COOKIE_SECURE: 'false',
       // Lowest cost bcrypt allows, to keep the suite fast.
       BCRYPT_ROUNDS: '4',
+      // The suite logs in far more often than staff would; security.test.ts
+      // turns the limits on with its own small numbers.
+      RATE_LIMIT_ENABLED: 'false',
     },
   },
 });

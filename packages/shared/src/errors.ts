@@ -13,6 +13,8 @@ export const ERROR_CODES = [
   'INSUFFICIENT_STOCK',
   'IDEMPOTENCY_KEY_REUSED',
   'PRICE_CHANGED',
+  'PAYLOAD_TOO_LARGE',
+  'RATE_LIMITED',
   'INTERNAL_ERROR',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

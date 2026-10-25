@@ -73,9 +73,15 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       // Same-origin in dev as in production (Nginx), so the SameSite=Strict
-      // refresh cookie works and the API needs no CORS.
+      // refresh cookie works and the API needs no CORS. xfwd passes the
+      // browser's Host on (X-Forwarded-Host), which the API's origin check
+      // compares with the Origin header, as it does behind Nginx.
       proxy: {
-        '/api': { target: env.API_PROXY_TARGET || 'http://localhost:4000', changeOrigin: true },
+        '/api': {
+          target: env.API_PROXY_TARGET || 'http://localhost:4000',
+          changeOrigin: true,
+          xfwd: true,
+        },
       },
     },
   };

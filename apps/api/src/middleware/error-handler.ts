@@ -2,6 +2,7 @@ import type { ApiErrorBody } from '@pharmacy/shared';
 import { Prisma } from '@prisma/client';
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { z, ZodError } from 'zod';
+import { reportError, requestContext } from '../lib/error-reporting';
 import { AppError } from '../lib/errors';
 import { logger } from '../lib/logger';
 
@@ -16,6 +17,7 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, req, res, _next)
   if (appError.status >= 500) {
     // req.log (with the request id) is set by pino-http; fall back if it isn't mounted.
     (req.log ?? logger).error({ err }, 'Unhandled error');
+    reportError(err, { source: 'http', ...requestContext(req) });
   }
 
   const body: ApiErrorBody = {
@@ -56,6 +58,9 @@ function toAppError(err: unknown): AppError {
 
   // body-parser errors (malformed JSON, body too large) carry a 4xx status
   // and expose: true when the message is safe to show.
+  if (isHttpError(err) && err.status === 413) {
+    return new AppError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
+  }
   if (isHttpError(err) && err.status < 500) {
     return new AppError(err.status, 'BAD_REQUEST', err.expose ? err.message : 'Bad request');
   }

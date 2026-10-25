@@ -29,7 +29,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/api/**/*.ts', '*.js'],
+    files: ['apps/api/**/*.{ts,mjs}', 'deploy/**/*.mjs', '*.{js,cjs}'],
     languageOptions: { globals: globals.node },
   },
   {
@@ -40,6 +40,10 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-assignment': 'off',
     },
+  },
+  {
+    files: ['apps/web/public/**/*.js'],
+    languageOptions: { globals: globals.browser },
   },
   {
     files: ['apps/web/**/*.{ts,tsx}'],

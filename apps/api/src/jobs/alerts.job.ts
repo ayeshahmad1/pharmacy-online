@@ -1,5 +1,6 @@
 import { type ScheduledTask, schedule } from 'node-cron';
 import { config } from '../lib/config';
+import { reportError } from '../lib/error-reporting';
 import { logger } from '../lib/logger';
 import { refreshAlerts } from '../modules/alerts/alerts.service';
 
@@ -17,6 +18,7 @@ export async function runAlertsJob() {
     log.info({ ...result, ms: Date.now() - started }, 'Alerts refreshed');
   } catch (err) {
     log.error({ err }, 'Alerts refresh failed');
+    reportError(err, { source: 'job:alerts' });
   }
 }
 

@@ -11,17 +11,19 @@ import { writeAudit } from '../../lib/audit';
 import { badRequest, notFound } from '../../lib/errors';
 import { hashPassword } from '../../lib/password';
 import { prisma } from '../../lib/prisma';
+import { escapeLike } from '../../lib/search';
 import { revokeAllRefreshTokens } from '../auth/auth.service';
 import { toUserDto, userDtoSelect } from './user.dto';
 
 export async function listUsers(query: ListUsersQuery): Promise<Paginated<UserDto>> {
+  const term = query.q && escapeLike(query.q);
   const where: Prisma.UserWhereInput = {
     ...(query.role && { role: { code: query.role } }),
     ...(query.status && { status: query.status }),
-    ...(query.q && {
+    ...(term && {
       OR: [
-        { username: { contains: query.q, mode: 'insensitive' } },
-        { fullName: { contains: query.q, mode: 'insensitive' } },
+        { username: { contains: term, mode: 'insensitive' } },
+        { fullName: { contains: term, mode: 'insensitive' } },
       ],
     }),
   };

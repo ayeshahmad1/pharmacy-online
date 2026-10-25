@@ -98,6 +98,11 @@ describe('GET /api/users', () => {
     expect(search.body.items.map((u: { username: string }) => u.username)).toEqual(['pharma']);
   });
 
+  it('matches LIKE wildcards in the search text literally', async () => {
+    const res = await api.get('/api/users?q=_');
+    expect(res.body.total).toBe(0);
+  });
+
   it('rejects an invalid query', async () => {
     const res = await api.get('/api/users?pageSize=1000');
     expect(res.status).toBe(400);
