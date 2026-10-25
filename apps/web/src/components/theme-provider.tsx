@@ -12,7 +12,7 @@ import {
 export type Theme = 'light' | 'dark' | 'system';
 type ResolvedTheme = 'light' | 'dark';
 
-// Also read by the inline script in index.html, which applies the theme before first paint.
+// Also read by public/theme-init.js, which applies the theme before first paint.
 const STORAGE_KEY = 'pharmacy-theme';
 const DARK_QUERY = '(prefers-color-scheme: dark)';
 
