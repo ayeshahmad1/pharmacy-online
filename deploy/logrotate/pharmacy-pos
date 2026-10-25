@@ -1,0 +1,12 @@
+# Install as /etc/logrotate.d/pharmacy-pos. Rotates the API's PM2 logs and the backup log.
+# copytruncate: PM2 keeps its log files open, so they are copied and emptied in place.
+/var/log/pharmacy-pos/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su pharmacy pharmacy
+}

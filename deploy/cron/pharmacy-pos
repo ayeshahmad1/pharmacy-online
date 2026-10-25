@@ -1,0 +1,7 @@
+# Install as /etc/cron.d/pharmacy-pos (owner root, mode 644). Times are the server's timezone
+# (README sets it to Asia/Karachi). Runs from the current release, so script fixes ship with deploys.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Daily database backup at 02:30, after the counter has closed.
+30 2 * * * pharmacy /opt/pharmacy-pos/current/deploy/scripts/backup-db.sh daily >> /var/log/pharmacy-pos/backup.log 2>&1
