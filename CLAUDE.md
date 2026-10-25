@@ -6,10 +6,10 @@ Web-based Pharmacy POS for a single pharmacy (multi-branch ready). Handles billi
 
 - Monorepo: pnpm workspaces
   - `apps/web`: React + Vite + TypeScript, Tailwind, shadcn/ui, TanStack Query, React Router, vite-plugin-pwa, Recharts
-  - `apps/api`: Node.js + Express + TypeScript, Prisma, PostgreSQL, Zod, JWT (access + refresh), bcrypt, node-cron, pino logger
+  - `apps/api`: Node.js + Express + TypeScript, Prisma, PostgreSQL, Zod, JWT (access + refresh), bcrypt, node-cron, pino logger, helmet, express-rate-limit, optional Sentry (`@sentry/node`, loaded only when `SENTRY_DSN` is set); bundled for production with esbuild (`dist/server.js`)
   - `packages/shared`: Zod schemas and shared types used by both apps
 - Tests: Vitest (+ Supertest for the API)
-- Deployment target: Ubuntu VPS, Nginx reverse proxy, Let's Encrypt HTTPS, PM2
+- Deployment target: Ubuntu VPS, Nginx reverse proxy, Let's Encrypt HTTPS, PM2 (one fork-mode process), UFW. Config and scripts in `deploy/` and `ecosystem.config.cjs`; the README is the deployment guide and runbook
 
 ## Folder structure
 
@@ -76,6 +76,14 @@ packages/shared/src/ (zod schemas, types, constants)
 - Auth: short-lived JWT access token (Bearer header, kept in memory by the client) + opaque refresh token in an httpOnly `SameSite=Strict` cookie scoped to `/api/auth`, stored hashed in `RefreshToken` and rotated on every refresh (replaying a rotated token revokes the family). `authenticate` re-reads the user's status and role from the DB on each request. Protect routes with `authenticate` + `requireRole(...)`.
 - Write audit entries with `writeAudit(tx, ...)` inside the same transaction as the change.
 - API tests run against the `pharmacy_pos_test` database (wiped per test), never the dev database.
+- **Production hardening** (decided in Session 12):
+  - Web app and API share one origin. `originGuard` refuses any browser request whose `Origin` is not the request's own (Host + protocol, as forwarded by Nginx/Vite) or listed in `CORS_ORIGINS`. Express trusts `X-Forwarded-*` from loopback only (`TRUST_PROXY`); the API listens on 127.0.0.1.
+  - helmet on every response; `Cache-Control: no-store` on all of `/api`; JSON bodies capped at 100 kB (413 `PAYLOAD_TOO_LARGE`).
+  - Rate limits (in memory, per app instance): every `/api` request per IP; failed logins per username+IP and per IP (successes don't count). 429 `RATE_LIMITED`. `/api/health*` is never limited.
+  - Refresh cookie is `__Secure-pharmacy_rt` when secure. Production refuses the example JWT secret and `COOKIE_SECURE=false`; token lifetimes are capped (access ≤ 1 h, refresh ≤ 30 days).
+  - `GET /api/health` (liveness, no DB) and `GET /api/health/ready` (DB within 2 s, else 503) are public and reveal no data.
+  - Unexpected errors (5xx, failed jobs, crashes) go to `reportError` (`lib/error-reporting.ts`) with request id, path, user id and role only: never bodies, headers, cookies or query strings. The web app has the same hook.
+  - The web app's CSP allows no inline or eval'd script: anything that must run before the bundle lives in `apps/web/public/` as a file (e.g. `theme-init.js`).
 
 ## Frontend rules
 

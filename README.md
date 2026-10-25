@@ -1,148 +1,523 @@
 # Pharmacy POS
 
-pnpm monorepo: `apps/api` (Express + Prisma), `apps/web` (React + Vite), `packages/shared` (shared types/constants).
-Rules and stack: see [CLAUDE.md](CLAUDE.md). Build plan: [SESSIONS.md](SESSIONS.md).
+Point of sale and inventory for a pharmacy counter: billing (works offline), medicine batches with
+FEFO and expiry, returns, reports and alerts. pnpm monorepo:
 
-## Local setup
+| Package           | What it is                                                         |
+| ----------------- | ------------------------------------------------------------------ |
+| `apps/api`        | Express + Prisma + PostgreSQL API                                  |
+| `apps/web`        | React + Vite PWA, served as static files                           |
+| `packages/shared` | Zod schemas and types used by both                                 |
+| `deploy/`         | Nginx, cron and logrotate config; deploy, rollback, backup scripts |
 
-Requires Node 22+, pnpm 10 (`corepack enable` picks up the version pinned in `package.json`) and Docker.
+Business rules and coding conventions: [CLAUDE.md](CLAUDE.md). What each screen and endpoint does:
+[docs/REFERENCE.md](docs/REFERENCE.md). Build plan: [SESSIONS.md](SESSIONS.md).
+
+**Contents:** [Local development](#local-development) · [Configuration](#configuration) ·
+[Production deployment](#production-deployment-ubuntu-vps) · [Updates and rollback](#updates-and-rollback) ·
+[Backups and restore](#backups-and-restore) · [Runbook](#runbook) · [Security](#security) · [Tests](#tests)
+
+```
+ Tills (browser/PWA)                       Ubuntu VPS
+ ┌──────────────────┐  HTTPS   ┌───────────────────────────────────────────────┐
+ │ web app          │ ───────► │ Nginx :443  ── static files (current release) │
+ │ IndexedDB queue  │          │      │ /api                                   │
+ │ (offline sales)  │          │      ▼                                        │
+ └──────────────────┘          │ API (PM2) 127.0.0.1:4000 ──► PostgreSQL :5432 │
+                               │                    cron ──► pg_dump ──► rclone ──► off-site storage
+                               └───────────────────────────────────────────────┘
+```
+
+## Local development
+
+Requires Node 22+, pnpm 10 (`corepack enable` picks up the version pinned in `package.json`) and
+Docker.
 
 ```bash
 pnpm install
 cp apps/api/.env.example apps/api/.env      # then set SEED_ADMIN_PASSWORD and JWT_ACCESS_SECRET
+cp apps/web/.env.example apps/web/.env      # receipt header/footer
 docker compose up -d                        # Postgres 17 on localhost:5433
 pnpm --filter api prisma migrate dev        # apply migrations
 pnpm --filter api db:seed                   # roles, admin user, sample medicines/batches
+pnpm dev                                    # API on :4000, web app on http://localhost:5173
 ```
 
 Postgres is exposed on **5433** (not 5432) so it does not clash with a locally installed Postgres.
-Override with `POSTGRES_PORT` and update `DATABASE_URL` to match.
-
-## Scripts
+Override with `POSTGRES_PORT` and update `DATABASE_URL` to match. Vite proxies `/api` to the API, so
+the browser stays on one origin exactly as behind Nginx in production.
 
 | Command                             | What it does                                       |
 | ----------------------------------- | -------------------------------------------------- |
-| `pnpm dev`                          | Runs every app that has a `dev` script             |
+| `pnpm dev`                          | API (`tsx watch`) and web app (Vite) together      |
 | `pnpm typecheck`                    | `tsc` in every package                             |
 | `pnpm lint`                         | ESLint (type-aware) over the repo                  |
 | `pnpm format` / `pnpm format:check` | Prettier                                           |
 | `pnpm test`                         | Tests in every package (API needs Docker Postgres) |
+| `pnpm --filter api build`           | Bundles the API to `apps/api/dist/server.js`       |
+| `pnpm --filter web build`           | Builds the PWA to `apps/web/dist`                  |
 | `pnpm --filter api db:studio`       | Prisma Studio to browse the database               |
 | `pnpm --filter api db:reset`        | Drop, re-migrate and re-seed the local database    |
 
-## API
+## Configuration
 
-`pnpm --filter api dev` starts the API on http://localhost:4000.
+Secrets live only in environment files that are never committed: `apps/api/.env` in development,
+`/opt/pharmacy-pos/shared/*.env` (mode 600) in production. Templates: `apps/api/.env.example`,
+`apps/web/.env.example`, `deploy/backup.env.example`. The API validates its environment at start-up
+and refuses to run with a bad value, printing the variable names (never the values).
 
-| Endpoint                                                    | Who               | Notes                                                                                      |
-| ----------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
-| `POST /api/auth/login`                                      | anyone            | `{ username, password }` → access token + user                                             |
-| `POST /api/auth/refresh`                                    | cookie            | Rotates the refresh cookie, returns a new access token                                     |
-| `POST /api/auth/logout`                                     | cookie            | Revokes the refresh token, clears the cookie                                               |
-| `GET /api/auth/me`                                          | any user          | Current user                                                                               |
-| `GET/POST /api/users`                                       | ADMIN             | List (`q`, `role`, `status`, `page`, `pageSize`) / create                                  |
-| `GET/PATCH /api/users/:id`                                  | ADMIN             | Get / update name, email, role                                                             |
-| `POST /api/users/:id/deactivate`                            | ADMIN             | Also revokes the user's sessions                                                           |
-| `POST /api/users/:id/activate`                              | ADMIN             |                                                                                            |
-| `POST /api/users/:id/reset-password`                        | ADMIN             | `{ newPassword }`; revokes the user's sessions                                             |
-| `GET /api/medicines`                                        | any user          | Search `q` (name or generic/salt name, ranked), `categoryId`, `status`, `page`, `pageSize` |
-| `GET /api/medicines/:id`                                    | any user          |                                                                                            |
-| `POST /api/medicines`                                       | ADMIN, PHARMACIST | `sellingPrice` is a decimal string, e.g. `"120.50"`                                        |
-| `PATCH /api/medicines/:id`                                  | ADMIN, PHARMACIST | Partial update; send `null`/`""` to clear an optional field                                |
-| `GET /api/categories`, `GET /api/suppliers`                 | any user          | `q`, `status`, `page`, `pageSize`                                                          |
-| `GET /api/categories/:id`, `GET /api/suppliers/:id`         | any user          |                                                                                            |
-| `POST /api/categories`, `POST /api/suppliers`               | ADMIN, PHARMACIST | Names are unique, ignoring case                                                            |
-| `PATCH /api/categories/:id`, `PATCH /api/suppliers/:id`     | ADMIN, PHARMACIST |                                                                                            |
-| `POST /api/{medicines,categories,suppliers}/:id/deactivate` | ADMIN, PHARMACIST | Soft: the row is kept; there is no DELETE                                                  |
-| `POST /api/{medicines,categories,suppliers}/:id/activate`   | ADMIN, PHARMACIST |                                                                                            |
+### API (`apps/api/.env`, production: `shared/api.env`)
 
-Send the access token as `Authorization: Bearer <token>`. The refresh token is an httpOnly cookie
-(`pharmacy_rt`, path `/api/auth`), so the browser sends it automatically to refresh/logout.
+| Variable                          | Default              | Notes                                                                                          |
+| --------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                        | `development`        | `production` on the server: secure cookies, strict checks, no sample data in the seed          |
+| `DATABASE_URL`                    | (required)           | `postgresql://user:password@localhost:5432/pharmacy_pos?schema=public`                         |
+| `PORT` / `HOST`                   | `4000` / `127.0.0.1` | Keep loopback: only Nginx on the same machine talks to the API                                 |
+| `LOG_LEVEL`                       | `info`               | Pino JSON logs; authorization headers, cookies, passwords and tokens are redacted              |
+| `JWT_ACCESS_SECRET`               | (required)           | ≥ 32 characters, random. Production refuses the example value                                  |
+| `JWT_ACCESS_TTL_SECONDS`          | `900`                | Access token lifetime, 60–3600                                                                 |
+| `REFRESH_TOKEN_TTL_DAYS`          | `7`                  | Sign-in lifetime, 1–30; renewed on every refresh                                               |
+| `COOKIE_SECURE`                   | `true` in production | Refresh cookie HTTPS-only (`__Secure-pharmacy_rt`). `false` is refused in production           |
+| `BCRYPT_ROUNDS`                   | `12`                 | Password hashing cost                                                                          |
+| `TRUST_PROXY`                     | `loopback`           | Which proxies may set `X-Forwarded-*`; decides client IPs for rate limits and the audit log    |
+| `CORS_ORIGINS`                    | (empty)              | Extra browser origins allowed to call the API, comma-separated. Normally empty                 |
+| `RATE_LIMIT_ENABLED`              | `true`               | The API's own limits (Nginx has more in front)                                                 |
+| `RATE_LIMIT_API_PER_MINUTE`       | `600`                | Requests per client IP per minute. All tills share the pharmacy's public IP                    |
+| `RATE_LIMIT_LOGIN_ATTEMPTS`       | `10`                 | Failed sign-ins per username+IP per window (5× per IP across usernames). Successes don't count |
+| `RATE_LIMIT_LOGIN_WINDOW_MINUTES` | `15`                 |                                                                                                |
+| `SENTRY_DSN`                      | (unset)              | Send unexpected errors to Sentry. Unset: errors are only logged                                |
+| `SENTRY_ENVIRONMENT`              | `NODE_ENV`           |                                                                                                |
+| `APP_RELEASE`                     | (set by PM2)         | Deployed commit, from the release's `REVISION` file; shown by `/api/health`                    |
+| `BUSINESS_TIMEZONE`               | `Asia/Karachi`       | Decides "today" for expiry, receipt numbers and reports                                        |
+| `EXPIRY_WARNING_DAYS`             | `90`                 | Default window of the expiring-soon list                                                       |
+| `CASHIER_MAX_DISCOUNT_PERCENT`    | `10`                 | Largest bill discount a cashier may give                                                       |
+| `OFFLINE_SALE_MAX_AGE_DAYS`       | `7`                  | Older offline sales are flagged for review instead of saved                                    |
+| `ALERTS_CRON`                     | `*/15 * * * *`       | Alerts job schedule (pharmacy timezone), also runs at start-up; `off` disables                 |
+| `ALERT_EXPIRY_DAYS`               | `30`                 | Batches expiring within this raise an alert                                                    |
+| `DEAD_STOCK_DAYS`                 | `60`                 | Dead-stock report window                                                                       |
+| `SEED_ADMIN_USERNAME`             | (seed only)          | First admin account created by `db:seed`                                                       |
+| `SEED_ADMIN_PASSWORD`             | (seed only)          | Give it only for the seed run (see below); production refuses the placeholder                  |
+| `TEST_DATABASE_URL`               | (dev only)           | Test database; its name must end in `_test`                                                    |
 
-## Web app
+### Web app (`apps/web/.env`, production: `shared/web.env`)
 
-`pnpm --filter web dev` starts the app on http://localhost:5173. Vite proxies `/api` to the API
-(`API_PROXY_TARGET`, default `http://localhost:4000`), so the browser stays same-origin, exactly as
-behind Nginx in production. Start the API first.
+Built into the public JavaScript bundle at build time, so **nothing secret** goes here.
 
-- **Auth:** the access token is kept in memory only; a reload restores the session from the refresh
-  cookie. A 401 triggers one shared refresh and a retry. Refreshes are serialised across tabs with a
-  Web Lock, because the server treats a reused refresh token as theft. Logging out in one tab logs out
-  the others.
-- **Roles:** cashiers land on Billing and see only Billing, My sales, Returns, My offline sales and Alerts. Pharmacists see
-  everything except Users. The menu lives in `apps/web/src/lib/navigation.ts`, and route guards in
-  `src/router.tsx` use the same role lists. The API enforces the real rules.
-- **PWA:** `pnpm --filter web build` emits a manifest and a Workbox service worker that precaches
-  the app shell (never API responses). New versions are offered with a "Reload" toast rather than
-  applied silently, so a cart is never lost mid-sale. The service worker is not registered under
-  `vite dev`; use `pnpm --filter web build && pnpm --filter web preview` to try it.
-- **UI:** shadcn/ui components live in `src/components/ui` (add more with `pnpm dlx shadcn@latest add
-<name>` from `apps/web`). Theme (light/dark/system) is stored in `localStorage`.
-- **Stock screens (admin, pharmacist):** Medicines (list, create/edit, a detail page with batches in
-  FEFO order and stock history), Categories, Suppliers, Inventory (all stock, low stock, expiring
-  soon, expired with write-off) and Inventory → Receive stock (one delivery, one line per batch).
-  Batches are adjusted from the medicine page or the expiring list. Search, filters and page live in
-  the URL, so Back and reload keep them.
-- **Forms** validate with the shared Zod schemas through `parseForm` (`src/lib/form.ts`), and API
-  field errors are mapped back onto the same fields. Money is typed and sent as strings and only
-  formatted or multiplied in exact paisa (`src/lib/money.ts`).
-- **Billing (every role):** keyboard first. The search box has focus between actions and matches
-  brand name, generic/salt name or an exact barcode (a scanner types the code and Enter, which adds
-  it at once; `3*` before a scan adds three). Out-of-stock or expired-only medicines open a list of
-  in-stock substitutes with the same salt. Shortcuts: F2 search, ↑/↓ select line, +/− quantity, F4
-  type quantity, F6 line discount, F7 bill discount, F8 pay, F9 hold, F10 held bills, Del remove
-  line, Esc clear. The pay dialog takes cash, card, mobile wallet or a split; change comes only from
-  cash. Totals mirror the API's pricing, but the API re-prices every sale and is the authority;
-  rejections (short or expired stock, the cashier discount cap) are shown on the line they concern.
-  The bill being built and held bills are kept in IndexedDB on the device (`src/offline/`), so a
-  reload never loses a cart; prices and stock are re-read on resume. The search uses
-  `GET /api/inventory/sellable?q=`, `GET /api/inventory/sellable/:id` and
-  `GET /api/inventory/medicines/:id/substitutes`.
-- **Offline billing:** the header shows Online/Offline (whether the API answers, probed at
-  `GET /api/ping`), how many sales wait to sync and how many were flagged; click it for details and
-  "Sync now". While online the device keeps a copy of every active medicine with its batch stock
-  (`GET /api/inventory/offline-catalogue`, refreshed every 5 minutes, in IndexedDB). Offline, search
-  and substitutes use that copy, with stock reduced by the sales this device has queued (FEFO, expiry
-  by the pharmacy's day). Paying offline, or when the server stops answering mid-sale, checks the
-  device's stock count and the cashier discount cap, queues the sale under the bill's idempotency key
-  and prints a provisional receipt (`OFF-XXXXXXXX`). The queue syncs oldest first on reconnect, after
-  each new sale and every 15 s while anything waits, backing off from 5 s to 5 min. The server
-  records the counter time as `soldAt` (and that day's receipt number) and refuses a sale whose total
-  no longer matches what was charged (`PRICE_CHANGED`). A refused sale is never dropped: it is
-  reported to `/api/offline-sales/conflicts` and listed under **Offline sales**, where a pharmacist or
-  admin saves it for the original cashier (after fixing stock, approving a discount, or accepting
-  today's prices) or dismisses it with a reason. After a reload while offline, the last signed-in
-  user (profile only, no token) carries on; the session is confirmed as soon as the server answers.
-  Offline sales must reach the server within `OFFLINE_SALE_MAX_AGE_DAYS` (default 7).
-- **Receipts:** an 80mm thermal layout printed from the browser (`P` on the sale-complete screen, or
-  automatically after each sale if ticked on that device). Set the printer's paper to the 80mm roll.
-  Header and footer come from `VITE_PHARMACY_NAME`, `VITE_PHARMACY_ADDRESS`, `VITE_PHARMACY_PHONE`
-  and `VITE_RECEIPT_FOOTER` in `apps/web/.env`.
-- **Dashboard and reports (admin, pharmacist):** the dashboard shows today against yesterday, the
-  month so far, the last 30 days (revenue and gross profit), best sellers, today's payment mix and
-  what needs attention. **Reports** has tabs for sales by day/week/month, profit and margin per
-  medicine, best sellers, cashiers, the daily cash closing, low stock (with the 30-day sales pace),
-  expiry (bucketed and valued), dead stock and supplier purchases. Date ranges and filters live in
-  the URL; **Export CSV** downloads every row (`?format=csv` on the same endpoint). Rules: sales count
-  on the day they were rung up (offline sales on their counter time), voided sales are left out, a
-  refund comes off the day of the original sale, and cost is the batch cost of what sold less units
-  returned to the shelf. Cash closing follows the drawer instead: every sale rung up that day, less
-  voids and refunds paid back that day. Charts and report pages are code-split, so billing devices
-  never download them.
-- **Alerts (every role sees them):** the API's alerts job (`ALERTS_CRON`, every 15 minutes and at
-  startup) opens an alert per out-of-stock or low-stock medicine and per batch expiring within
-  `ALERT_EXPIRY_DAYS` (default 30) or expired with stock on the shelf, and resolves it by itself once
-  dealt with. The bell in the header counts unread alerts; a pharmacist or admin marks them seen
-  (for everyone) or runs **Check now** on the Alerts page.
-- **Warnings:** expiring within 30 days is red, within 90 days amber (`src/lib/stock-status.ts`);
-  out of stock is red, at or below the reorder level amber. Expiring soon uses the API's
-  `EXPIRY_WARNING_DAYS` window unless another is picked.
+| Variable                                       | Notes                                  |
+| ---------------------------------------------- | -------------------------------------- |
+| `VITE_PHARMACY_NAME`                           | Printed at the top of the 80mm receipt |
+| `VITE_PHARMACY_ADDRESS`, `VITE_PHARMACY_PHONE` | Receipt header lines                   |
+| `VITE_RECEIPT_FOOTER`                          | Receipt footer                         |
+| `API_PROXY_TARGET`                             | Dev only: where Vite proxies `/api`    |
+
+### Backups (`shared/backup.env`)
+
+| Variable                       | Default                     | Notes                                                                    |
+| ------------------------------ | --------------------------- | ------------------------------------------------------------------------ |
+| `BACKUP_DIR`                   | `/var/backups/pharmacy-pos` | Local dumps, in `daily/`, `pre-deploy/`, `manual/`                       |
+| `BACKUP_RETENTION_DAYS`        | `14`                        | Local daily/manual dumps older than this are deleted                     |
+| `BACKUP_PRE_DEPLOY_KEEP`       | `10`                        | Pre-deploy dumps kept (by count)                                         |
+| `BACKUP_REMOTE`                | (empty = local only)        | rclone `remote:path` (S3, B2, Google Drive, SFTP, …)                     |
+| `BACKUP_REMOTE_RETENTION_DAYS` | `90`                        | Off-site copies older than this are deleted                              |
+| `BACKUP_GPG_PASSPHRASE_FILE`   | (empty = no encryption)     | Encrypt off-site copies (AES-256). Keep a copy of the key off the server |
+| `BACKUP_HEALTHCHECK_URL`       | (empty)                     | Dead-man's switch pinged by the daily backup (e.g. healthchecks.io)      |
+
+## Production deployment (Ubuntu VPS)
+
+Tested layout: Ubuntu 24.04 LTS, 2 vCPU, **2 GB RAM or more** (the web build needs ~1 GB), 25 GB
+disk. You need a domain name (below `pos.example.com`) whose DNS **A/AAAA record points at the VPS**
+before step 8. Commands run as a sudo-capable admin user unless they start with `sudo -iu pharmacy`.
+
+Layout on the server:
+
+```
+/opt/pharmacy-pos/
+  repo/                     git clone, only used to fetch and export releases
+  releases/<stamp>-<sha>/   one directory per deploy (last 5 kept)
+  current -> releases/…     what Nginx serves and PM2 runs
+  shared/api.env            API secrets and settings          (mode 600)
+  shared/web.env            receipt header/footer             (mode 600)
+  shared/backup.env         backup settings                   (mode 600)
+/var/backups/pharmacy-pos/  database dumps
+/var/log/pharmacy-pos/      API logs (PM2) and backup log
+```
+
+### 1. Base system and firewall
+
+```bash
+sudo apt update && sudo apt -y upgrade
+sudo timedatectl set-timezone Asia/Karachi          # cron times (02:30 backup) are local
+sudo apt install -y git curl gnupg nginx certbot rclone ufw unattended-upgrades
+sudo dpkg-reconfigure -f noninteractive unattended-upgrades   # automatic security updates
+
+# Firewall: only SSH (rate-limited) and HTTP/HTTPS. The API (4000) and Postgres (5432) listen on
+# 127.0.0.1 only and are never opened.
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw limit OpenSSH
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+sudo ufw status verbose
+```
+
+Use SSH keys and turn off password login (`PasswordAuthentication no` in
+`/etc/ssh/sshd_config`, then `sudo systemctl restart ssh`) once your key works. On a 2 GB VPS add
+swap so builds cannot run out of memory:
+`sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab`.
+
+### 2. Node.js 22, pnpm and PM2
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x -o /tmp/nodesource_setup.sh
+sudo bash /tmp/nodesource_setup.sh
+sudo apt install -y nodejs
+sudo corepack enable                # provides pnpm at the version pinned in package.json
+sudo npm install -g pm2
+node --version                      # v22.x
+```
+
+### 3. PostgreSQL 17
+
+```bash
+sudo apt install -y postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+sudo apt install -y postgresql-17
+openssl rand -hex 24                 # copy this: the database password
+sudo -u postgres createuser --pwprompt pharmacy      # paste the password twice
+sudo -u postgres createdb --owner=pharmacy pharmacy_pos
+```
+
+Postgres listens on localhost only by default; keep it that way.
+
+### 4. App user, directories and code
+
+```bash
+sudo adduser --system --group --shell /bin/bash --home /home/pharmacy pharmacy
+sudo mkdir -p /opt/pharmacy-pos/releases /opt/pharmacy-pos/shared \
+  /var/backups/pharmacy-pos /var/log/pharmacy-pos /var/www/letsencrypt
+sudo chown -R pharmacy:pharmacy /opt/pharmacy-pos /var/backups/pharmacy-pos /var/log/pharmacy-pos
+sudo chmod 700 /opt/pharmacy-pos/shared /var/backups/pharmacy-pos
+```
+
+Give the server read-only access to the repository with a deploy key:
+
+```bash
+sudo -iu pharmacy bash -c 'mkdir -p -m 700 ~/.ssh && ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519 -C pharmacy-pos-deploy'
+sudo cat /home/pharmacy/.ssh/id_ed25519.pub
+# GitHub → repository → Settings → Deploy keys → Add (read-only), paste the key.
+sudo -iu pharmacy git clone git@github.com:ayeshahmad1/pharmacy-online.git /opt/pharmacy-pos/repo
+```
+
+### 5. Configure
+
+```bash
+sudo -iu pharmacy
+cd /opt/pharmacy-pos
+cp repo/deploy/backup.env.example shared/backup.env
+cp repo/apps/web/.env.example shared/web.env
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"   # JWT secret
+nano shared/api.env
+```
+
+`shared/api.env` needs at least (see [Configuration](#configuration) for the rest):
+
+```bash
+NODE_ENV=production
+DATABASE_URL="postgresql://pharmacy:<db password>@localhost:5432/pharmacy_pos?schema=public"
+JWT_ACCESS_SECRET="<the random string from above>"
+BUSINESS_TIMEZONE="Asia/Karachi"
+SEED_ADMIN_USERNAME="admin"
+SEED_ADMIN_FULL_NAME="Pharmacy Owner"
+```
+
+Then set the receipt lines in `shared/web.env`, lock the files down and leave the pharmacy shell:
+
+```bash
+chmod 600 shared/*.env
+exit
+```
+
+### 6. First deploy
+
+```bash
+sudo -iu pharmacy /opt/pharmacy-pos/repo/deploy/scripts/deploy.sh main
+```
+
+This installs dependencies, builds the web app and the API, runs the database migrations, points
+`current` at the release and starts the API under PM2, then waits for `/api/health/ready`. Then
+create the first admin (the password is typed, so it stays out of files and shell history):
+
+```bash
+sudo -iu pharmacy
+cd /opt/pharmacy-pos/current
+read -rsp 'Password for the first admin: ' SEED_ADMIN_PASSWORD; echo; export SEED_ADMIN_PASSWORD
+pnpm --filter api db:seed            # roles + admin; never sample data in production
+unset SEED_ADMIN_PASSWORD
+pm2 save
+exit
+```
+
+Start PM2 at boot (it prints a command; it is the same as this):
+
+```bash
+sudo env PATH="$PATH:/usr/bin" pm2 startup systemd -u pharmacy --hp /home/pharmacy
+```
+
+### 7. Logs, rotation and backups
+
+```bash
+sudo cp /opt/pharmacy-pos/current/deploy/logrotate/pharmacy-pos /etc/logrotate.d/pharmacy-pos
+sudo cp /opt/pharmacy-pos/current/deploy/cron/pharmacy-pos /etc/cron.d/pharmacy-pos
+sudo chmod 644 /etc/cron.d/pharmacy-pos /etc/logrotate.d/pharmacy-pos
+```
+
+Off-site copies (strongly recommended; a backup on the same VPS dies with it):
+
+```bash
+sudo -iu pharmacy
+rclone config                        # create a remote, e.g. "offsite" (S3/B2/Drive/SFTP)
+openssl rand -base64 48 > /opt/pharmacy-pos/shared/backup.key && chmod 600 /opt/pharmacy-pos/shared/backup.key
+cat /opt/pharmacy-pos/shared/backup.key   # store this in a password manager, NOT only on the VPS
+nano /opt/pharmacy-pos/shared/backup.env  # BACKUP_REMOTE=offsite:pharmacy-pos-backups
+                                          # BACKUP_GPG_PASSPHRASE_FILE=/opt/pharmacy-pos/shared/backup.key
+/opt/pharmacy-pos/current/deploy/scripts/backup-db.sh manual   # must end with "Done"
+exit
+```
+
+### 8. Nginx and HTTPS (Let's Encrypt)
+
+```bash
+DOMAIN=pos.example.com
+EMAIL=you@example.com
+SRC=/opt/pharmacy-pos/current/deploy/nginx
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# a) HTTP-only site to answer the certificate challenge
+sudo cp $SRC/pharmacy-pos-bootstrap.conf /etc/nginx/sites-available/pharmacy-pos
+sudo sed -i "s/pos\.example\.com/$DOMAIN/g" /etc/nginx/sites-available/pharmacy-pos
+sudo ln -sfn /etc/nginx/sites-available/pharmacy-pos /etc/nginx/sites-enabled/pharmacy-pos
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot certonly --webroot -w /var/www/letsencrypt -d "$DOMAIN" \
+  --email "$EMAIL" --agree-tos --no-eff-email
+
+# b) the real site: HTTPS, security headers, /api proxy, rate limits
+sudo cp $SRC/snippets/pharmacy-pos-*.conf /etc/nginx/snippets/
+sudo cp $SRC/pharmacy-pos.conf /etc/nginx/sites-available/pharmacy-pos
+sudo sed -i "s/pos\.example\.com/$DOMAIN/g" /etc/nginx/sites-available/pharmacy-pos
+sudo nginx -t && sudo systemctl reload nginx
+
+# c) reload Nginx whenever certbot's timer renews the certificate
+printf '#!/bin/sh\nsystemctl reload nginx\n' | sudo tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+sudo chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
+sudo certbot renew --dry-run
+```
+
+### 9. Check it
+
+```bash
+curl -s https://$DOMAIN/api/health/ready      # {"status":"ok",...,"checks":{"database":"ok"}}
+curl -sI https://$DOMAIN | grep -iE 'strict-transport|content-security'
+curl -sI http://$DOMAIN | head -1              # 301 to https
+sudo ss -tlnp | grep -E ':4000|:5432'          # both on 127.0.0.1 only
+sudo -iu pharmacy pm2 status                   # pharmacy-pos-api online
+```
+
+Open `https://pos.example.com`, sign in as the admin, create staff accounts under **Users**, then
+on each till install the app (browser menu → Install) and sign in once while online so it can cache
+the catalogue for offline billing.
+
+## Updates and rollback
+
+### Deploy an update
+
+Push to `main` (or tag a release), then on the server:
+
+```bash
+sudo -iu pharmacy /opt/pharmacy-pos/current/deploy/scripts/deploy.sh main      # or a tag: v1.4.0
+```
+
+The script builds the new release beside the running one, takes a **pre-deploy database backup**,
+applies migrations, switches `current`, restarts the API (2–3 seconds; tills carry on offline and
+sync afterwards) and waits for `/api/health/ready`. If the new release is not healthy within 30
+seconds it **switches back to the previous release automatically** and exits with an error. Tills
+show an "Update available" prompt and reload only when the cashier chooses, never mid-sale.
+
+Deploy when the counter is quiet. Prefer migrations that only add (new tables, nullable or
+defaulted columns) and remove old things in a later release, so the previous code can still run on
+the new schema; that keeps every rollback a code-only rollback.
+
+### Roll back
+
+```bash
+sudo -iu pharmacy /opt/pharmacy-pos/current/deploy/scripts/rollback.sh             # previous release
+sudo -iu pharmacy /opt/pharmacy-pos/current/deploy/scripts/rollback.sh 20261101093000-ab12cd3
+ls /opt/pharmacy-pos/releases                                                      # what's available
+```
+
+Only code is rolled back. If the release being left applied migrations, the script lists them and
+asks first. If the older code cannot work with the newer schema (a column it needs was dropped or
+renamed), roll the database back too by restoring the pre-deploy backup **after** rolling back the
+code. This loses everything written since that deploy, so first export or note the sales made since:
+
+```bash
+ls -t /var/backups/pharmacy-pos/pre-deploy/ | head -3
+sudo /opt/pharmacy-pos/current/deploy/scripts/restore-db.sh \
+  /var/backups/pharmacy-pos/pre-deploy/pharmacy_pos-pre-deploy-<stamp>.dump pharmacy_pos_restored --swap
+```
+
+## Backups and restore
+
+- **Daily** at 02:30 (`/etc/cron.d/pharmacy-pos`), **before every deploy**, and on demand
+  (`backup-db.sh manual`). Each is a `pg_dump` custom-format file, checked with `pg_restore --list`,
+  with a `.sha256` beside it.
+- Local copies in `/var/backups/pharmacy-pos/{daily,pre-deploy,manual}`; daily ones are kept 14 days.
+- Off-site copies via rclone to `BACKUP_REMOTE`, encrypted with gpg when
+  `BACKUP_GPG_PASSPHRASE_FILE` is set, pruned after 90 days.
+- Log: `/var/log/pharmacy-pos/backup.log`. Set `BACKUP_HEALTHCHECK_URL` to be told when a nightly
+  backup does not happen.
+
+**Restore** always goes into a new database first; the live one is only replaced with `--swap`:
+
+```bash
+# from a local dump
+sudo /opt/pharmacy-pos/current/deploy/scripts/restore-db.sh \
+  /var/backups/pharmacy-pos/daily/pharmacy_pos-daily-<stamp>.dump pharmacy_pos_check
+# from off-site: download the .gpg and its .sha256, then restore (decrypts with backup.env's key)
+sudo -iu pharmacy rclone copy offsite:pharmacy-pos-backups/daily/<file>.dump.gpg /tmp/restore/
+sudo -iu pharmacy rclone copy offsite:pharmacy-pos-backups/daily/<file>.dump.sha256 /tmp/restore/
+sudo /opt/pharmacy-pos/current/deploy/scripts/restore-db.sh /tmp/restore/<file>.dump.gpg pharmacy_pos_check
+```
+
+It prints row counts and the last sale time to compare with what you expect. Then either drop the
+copy (`sudo -u postgres dropdb pharmacy_pos_check`) or re-run with a new name and `--swap` to make
+it live: the API is stopped, the live database is renamed `pharmacy_pos_before_restore_<stamp>` (kept
+until you drop it) and the restored one takes its name.
+
+**Rebuilding on a new VPS:** follow the deployment steps 1–8, but before seeding, restore the latest
+off-site dump with `--swap` (skip `db:seed`), then deploy again so migrations newer than the dump
+are applied.
+
+**Test a restore every month** into a scratch database: a backup that was never restored is a hope,
+not a backup.
+
+## Runbook
+
+Commands as the app user start with `sudo -iu pharmacy`. Logs are JSON lines; every API response
+carries an `X-Request-Id` header, and the same id is in the log line for that request.
+
+| Check                   | Command                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------- |
+| API process             | `sudo -iu pharmacy pm2 status`                                                        |
+| API logs (live)         | `sudo -iu pharmacy pm2 logs pharmacy-pos-api --lines 200`                             |
+| API and database health | `curl -s localhost:4000/api/health/ready`                                             |
+| Which release is live   | `readlink /opt/pharmacy-pos/current` or `curl -s localhost:4000/api/health`           |
+| Find one request        | `grep <request-id> /var/log/pharmacy-pos/api.out.log`                                 |
+| Nginx                   | `sudo systemctl status nginx`, `sudo tail -f /var/log/nginx/error.log`                |
+| Postgres                | `sudo systemctl status postgresql`                                                    |
+| Backups                 | `tail -50 /var/log/pharmacy-pos/backup.log`, `ls -lt /var/backups/pharmacy-pos/daily` |
+| Disk                    | `df -h /`                                                                             |
+| Certificate             | `sudo certbot certificates`                                                           |
+
+**The site shows 502 Bad Gateway.** The API is not answering. `pm2 status`; if errored, read
+`pm2 logs pharmacy-pos-api --err --lines 100`. "Invalid environment configuration" names the bad
+variable in `shared/api.env`; fix it and `pm2 restart pharmacy-pos-api --update-env`. If it crashed
+after a deploy, run `rollback.sh`. Tills keep billing offline meanwhile and sync when it is back.
+
+**`/api/health/ready` says the database is unavailable (503).** `sudo systemctl status postgresql`,
+`sudo journalctl -u postgresql@17-main -n 100`; a full disk is the usual cause (`df -h`). Start it
+with `sudo systemctl start postgresql`. The API reconnects by itself.
+
+**Disk is filling up.** Usual suspects: `/var/backups/pharmacy-pos` (lower the retention),
+`/opt/pharmacy-pos/releases` (deploys keep 5), logs (`sudo journalctl --vacuum-size=200M`). Never
+delete files under `/var/lib/postgresql`.
+
+**A staff member is told "Too many failed sign-in attempts".** Ten wrong passwords for one username
+from one IP within 15 minutes. Wait for the window, or clear the counters with
+`sudo -iu pharmacy pm2 restart pharmacy-pos-api` (counters are in memory). If it happens without
+anyone mistyping, someone may be guessing: check `AUTH_LOGIN_FAILED` rows in the audit log.
+
+**Forgotten password.** An admin resets it under **Users** (that also signs the user out
+everywhere). If the only admin is locked out, create a second admin with the seed, which only adds
+accounts that don't exist yet:
+
+```bash
+sudo -iu pharmacy
+cd /opt/pharmacy-pos/current
+export SEED_ADMIN_USERNAME=rescue-admin
+read -rsp 'Password: ' SEED_ADMIN_PASSWORD; echo; export SEED_ADMIN_PASSWORD
+pnpm --filter api db:seed && unset SEED_ADMIN_PASSWORD
+```
+
+Sign in as `rescue-admin`, reset the original admin's password, then deactivate `rescue-admin`.
+
+**A device is lost or a secret may have leaked.** Deactivate the affected users (revokes their
+sessions at once). To sign everyone out: generate a new `JWT_ACCESS_SECRET` in `shared/api.env`,
+`pm2 restart pharmacy-pos-api --update-env`, and revoke every refresh token:
+`sudo -u postgres psql pharmacy_pos -c 'UPDATE "RefreshToken" SET "revokedAt" = now() WHERE "revokedAt" IS NULL'`.
+If the database password leaked, change it (`sudo -u postgres psql -c '\password pharmacy'`) and in
+`DATABASE_URL`, then restart.
+
+**Offline sales did not sync.** The header on the till shows how many are waiting and lets you
+"Sync now". Sales the server refused are never dropped: a pharmacist or admin saves or dismisses them
+under **Offline sales**. A queued sale syncs only when its own cashier is signed in on that till.
+
+**Alerts are not updating.** `pm2 logs pharmacy-pos-api | grep alerts`; "Skipped: another alerts
+run holds the lock" is harmless. A pharmacist or admin can run **Check now** on the Alerts page.
+
+**Backup failed.** Read `backup.log`. Common causes: disk full, the rclone remote's credentials
+expired (`sudo -iu pharmacy rclone lsd offsite:`), a wrong key path. Run
+`backup-db.sh manual` after fixing it.
+
+**Certificate expiring.** certbot's systemd timer renews automatically (`systemctl list-timers |
+grep certbot`). Test with `sudo certbot renew --dry-run`; port 80 must stay open for the challenge.
+
+**Server rebooted.** PM2 brings the API back (`pm2 startup` from step 6). Check `pm2 status` and the
+health URL. Reboot for kernel updates when the pharmacy is closed: `sudo reboot`.
+
+**Error reporting.** Set `SENTRY_DSN` (and optionally `SENTRY_ENVIRONMENT`) in `shared/api.env`,
+then `pm2 restart pharmacy-pos-api --update-env`. 5xx responses, failed alert jobs and crashes are
+sent with the request id, route, user id and role, never bodies, headers, cookies or query strings.
+The web app has the same hook (`apps/web/src/lib/error-reporting.ts`); wiring it to Sentry is
+described there and needs the Sentry host in the CSP.
+
+## Security
+
+What the app does for you:
+
+- **HTTPS only.** HTTP redirects to HTTPS; HSTS; TLS 1.2+; unknown hostnames are dropped.
+- **Same origin.** The web app and API share one origin. The API refuses browser requests from any
+  other origin (`CORS_ORIGINS` to allow more), and the refresh cookie is `httpOnly`, `Secure`,
+  `SameSite=Strict`, `__Secure-` prefixed and limited to `/api/auth`.
+- **Tokens.** Access tokens are short-lived JWTs (HS256, issuer and audience checked) held in memory
+  only; refresh tokens are random, stored hashed, rotated on every use, and a replayed one revokes
+  the whole family. Every request re-reads the user's status and role from the database.
+- **Roles enforced by the API** on every route (`requireRole`), and per row in services (a cashier
+  sees only their own sales, returns and offline conflicts, and never cost prices).
+- **Brute force and abuse.** Failed logins are limited per username and IP and per IP; every API
+  request is limited per IP; Nginx adds its own limits in front. Login timing does not reveal whether
+  a username exists.
+- **Input.** Every body, query and param is validated with Zod (strict objects, bounded lengths and
+  list sizes); JSON bodies over 100 kB are refused (413), Nginx caps requests at 1 MB. All SQL goes
+  through Prisma or `Prisma.sql` tagged templates, so values are always bound parameters; search
+  text is escaped for `LIKE`; CSV exports neutralise spreadsheet formulas.
+- **Headers.** API responses: helmet (CSP `default-src 'none'`, nosniff, no framing,
+  `Cache-Control: no-store`). Web app: a CSP with no inline or eval'd script, `X-Frame-Options: DENY`,
+  `Permissions-Policy`.
+- **Secrets** only from env files (mode 600). Production refuses the example JWT secret and insecure
+  cookies. Logs redact authorization headers, cookies, passwords and tokens; the audit log strips
+  password/token/secret fields. Backups can be encrypted before leaving the server.
+- **Network.** The API and Postgres listen on 127.0.0.1; UFW allows only SSH, 80 and 443.
+
+What stays with you: strong, unique staff passwords; one account per person (never shared
+logins); deactivating leavers the same day; SSH keys only; installing OS updates; keeping the backup
+key somewhere safe off the server; and testing restores.
 
 ## Tests
 
 API integration tests run against a separate database, `pharmacy_pos_test`, on the Docker Postgres
 (override with `TEST_DATABASE_URL`). It is created and migrated automatically and **wiped before every
-test**; the suite refuses to run against a database whose name does not end in `_test`.
+test**; the suite refuses to run against a database whose name does not end in `_test`. Rate limits
+are off in the suite except in `test/security.test.ts`, which turns them on with small numbers.
 
 Web tests (`pnpm --filter web test`) are plain Vitest unit tests with a mocked `fetch`; they need no
 server.
