@@ -69,7 +69,7 @@ behind Nginx in production. Start the API first.
   cookie. A 401 triggers one shared refresh and a retry. Refreshes are serialised across tabs with a
   Web Lock, because the server treats a reused refresh token as theft. Logging out in one tab logs out
   the others.
-- **Roles:** cashiers land on Billing and see only Billing, My sales and Returns. Pharmacists see
+- **Roles:** cashiers land on Billing and see only Billing, My sales, Returns and My offline sales. Pharmacists see
   everything except Users. The menu lives in `apps/web/src/lib/navigation.ts`, and route guards in
   `src/router.tsx` use the same role lists. The API enforces the real rules.
 - **PWA:** `pnpm --filter web build` emits a manifest and a Workbox service worker that precaches
@@ -98,6 +98,22 @@ behind Nginx in production. Start the API first.
   reload never loses a cart; prices and stock are re-read on resume. The search uses
   `GET /api/inventory/sellable?q=`, `GET /api/inventory/sellable/:id` and
   `GET /api/inventory/medicines/:id/substitutes`.
+- **Offline billing:** the header shows Online/Offline (whether the API answers, probed at
+  `GET /api/ping`), how many sales wait to sync and how many were flagged; click it for details and
+  "Sync now". While online the device keeps a copy of every active medicine with its batch stock
+  (`GET /api/inventory/offline-catalogue`, refreshed every 5 minutes, in IndexedDB). Offline, search
+  and substitutes use that copy, with stock reduced by the sales this device has queued (FEFO, expiry
+  by the pharmacy's day). Paying offline, or when the server stops answering mid-sale, checks the
+  device's stock count and the cashier discount cap, queues the sale under the bill's idempotency key
+  and prints a provisional receipt (`OFF-XXXXXXXX`). The queue syncs oldest first on reconnect, after
+  each new sale and every 15 s while anything waits, backing off from 5 s to 5 min. The server
+  records the counter time as `soldAt` (and that day's receipt number) and refuses a sale whose total
+  no longer matches what was charged (`PRICE_CHANGED`). A refused sale is never dropped: it is
+  reported to `/api/offline-sales/conflicts` and listed under **Offline sales**, where a pharmacist or
+  admin saves it for the original cashier (after fixing stock, approving a discount, or accepting
+  today's prices) or dismisses it with a reason. After a reload while offline, the last signed-in
+  user (profile only, no token) carries on; the session is confirmed as soon as the server answers.
+  Offline sales must reach the server within `OFFLINE_SALE_MAX_AGE_DAYS` (default 7).
 - **Receipts:** an 80mm thermal layout printed from the browser (`P` on the sale-complete screen, or
   automatically after each sale if ticked on that device). Set the printer's paper to the 80mm roll.
   Header and footer come from `VITE_PHARMACY_NAME`, `VITE_PHARMACY_ADDRESS`, `VITE_PHARMACY_PHONE`
