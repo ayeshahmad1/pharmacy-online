@@ -1,4 +1,5 @@
 import type { ApiErrorBody, AuthResponse, ErrorCode } from '@pharmacy/shared';
+import { connectivity } from './connectivity';
 
 /**
  * API client. The access token lives only in memory (never localStorage); the
@@ -6,6 +7,8 @@ import type { ApiErrorBody, AuthResponse, ErrorCode } from '@pharmacy/shared';
  * A 401 triggers one refresh (shared by every request that hit it) and a
  * single retry. If the refresh is rejected the session is over and listeners
  * are told, so the app can return to the login page.
+ *
+ * Every request also tells `connectivity` whether the server answered.
  */
 
 const API_BASE = '/api';
@@ -32,6 +35,11 @@ export type SessionEvent =
 type SessionListener = (event: SessionEvent) => void;
 
 let accessToken: string | null = null;
+/**
+ * The app resumed a session offline (after a reload, from the remembered
+ * user) and has no access token yet: the refresh cookie may still be good.
+ */
+let restorable = false;
 let refreshInFlight: Promise<AuthResponse> | null = null;
 const listeners = new Set<SessionListener>();
 
@@ -45,6 +53,14 @@ export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
+/** See `restorable`: lets the first 401 try the refresh cookie, and its rejection end the session. */
+export function setSessionRestorable(value: boolean) {
+  restorable = value;
+}
+
+/** Answers from a proxy in front of the API: the API itself wasn't reached. */
+const UNREACHABLE = [502, 503, 504];
+
 export function onSessionEvent(listener: SessionListener) {
   listeners.add(listener);
   return () => void listeners.delete(listener);
@@ -56,8 +72,9 @@ function emit(event: SessionEvent) {
 
 function endSession(reason: 'expired' | 'logout') {
   // No token means no session to end, e.g. the restore attempt on first load.
-  if (accessToken === null) return;
+  if (accessToken === null && !restorable) return;
   accessToken = null;
+  restorable = false;
   emit({ type: 'ended', reason });
 }
 
@@ -84,8 +101,9 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
   if (options.body !== undefined) headers.set('Content-Type', 'application/json');
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
+  let res: Response;
   try {
-    return await fetch(buildUrl(path, options.query), {
+    res = await fetch(buildUrl(path, options.query), {
       method: options.method ?? 'GET',
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -95,8 +113,12 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
   } catch (err) {
     // Let cancellations (e.g. TanStack Query unmounts) propagate unchanged.
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    connectivity.unreachable();
     throw new ApiError(0, 'NETWORK_ERROR', 'Cannot reach the server. Check the connection.');
   }
+  if (UNREACHABLE.includes(res.status)) connectivity.unreachable();
+  else connectivity.reachable();
+  return res;
 }
 
 async function parse<T>(res: Response): Promise<T> {
@@ -116,6 +138,7 @@ async function doRefresh(): Promise<AuthResponse> {
   try {
     const auth = await parse<AuthResponse>(await send('/auth/refresh', { method: 'POST' }));
     accessToken = auth.accessToken;
+    restorable = false;
     emit({ type: 'refreshed', auth });
     return auth;
   } catch (err) {
@@ -151,7 +174,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const tokenUsed = accessToken;
   const res = await send(path, options);
 
-  if (res.status === 401 && tokenUsed) {
+  if (res.status === 401 && (tokenUsed || restorable)) {
     // Another request may already have refreshed while this one was in flight.
     if (accessToken === tokenUsed) await refreshSession();
     return parse<T>(await send(path, options));
@@ -172,6 +195,7 @@ export async function login(username: string, password: string): Promise<AuthRes
     await send('/auth/login', { method: 'POST', body: { username, password } }),
   );
   accessToken = auth.accessToken;
+  restorable = false;
   return auth;
 }
 
@@ -185,6 +209,13 @@ export async function logout(): Promise<void> {
     channel?.postMessage('logout');
     endSession('logout');
   }
+}
+
+/** The request never reached the API: no network, or a proxy answered for it. */
+export function isUnreachable(err: unknown): boolean {
+  return (
+    err instanceof ApiError && (err.code === 'NETWORK_ERROR' || UNREACHABLE.includes(err.status))
+  );
 }
 
 /** A message fit for a toast or inline error. */
