@@ -2,6 +2,7 @@ import { ROLE_CODES, type RoleCode } from '@pharmacy/shared';
 import {
   BarChart3Icon,
   BoxesIcon,
+  CloudOffIcon,
   LayoutDashboardIcon,
   PillIcon,
   ReceiptTextIcon,
@@ -44,6 +45,13 @@ export const NAV_SECTIONS: NavSection[] = [
         roles: ALL_ROLES,
       },
       { path: '/returns', label: 'Returns', icon: Undo2Icon, roles: ALL_ROLES },
+      {
+        path: '/offline-sales',
+        label: 'Offline sales',
+        cashierLabel: 'My offline sales',
+        icon: CloudOffIcon,
+        roles: ALL_ROLES,
+      },
     ],
   },
   {

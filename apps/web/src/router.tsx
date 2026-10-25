@@ -8,6 +8,7 @@ import { InventoryPage } from '@/features/inventory/inventory-page';
 import { ReceiveStockPage } from '@/features/inventory/receive-stock-page';
 import { MedicineDetailPage } from '@/features/medicines/medicine-detail-page';
 import { MedicinesPage } from '@/features/medicines/medicines-page';
+import { OfflineSalesPage } from '@/features/offline-sales/offline-sales-page';
 import { SuppliersPage } from '@/features/suppliers/suppliers-page';
 import { ADMIN_ONLY, ALL_ROLES, STAFF_ROLES } from '@/lib/navigation';
 import { NotFoundPage } from '@/pages/not-found-page';
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
               { path: 'billing', element: <BillingPage /> },
               { path: 'sales', element: <PlaceholderPage title="Sales" /> },
               { path: 'returns', element: <PlaceholderPage title="Returns" /> },
+              { path: 'offline-sales', element: <OfflineSalesPage /> },
             ],
           },
           {

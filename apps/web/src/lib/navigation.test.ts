@@ -6,8 +6,8 @@ const pathsFor = (role: RoleCode) =>
   navForRole(role).flatMap((section) => section.items.map((item) => item.path));
 
 describe('role-based navigation', () => {
-  it('shows a cashier only billing, their own sales and returns', () => {
-    expect(pathsFor('CASHIER')).toEqual(['/billing', '/sales', '/returns']);
+  it('shows a cashier only billing, their own sales, returns and offline sales', () => {
+    expect(pathsFor('CASHIER')).toEqual(['/billing', '/sales', '/returns', '/offline-sales']);
     expect(navForRole('CASHIER').map((s) => s.title)).toEqual(['Counter']);
   });
 
@@ -24,6 +24,7 @@ describe('role-based navigation', () => {
       '/billing',
       '/sales',
       '/returns',
+      '/offline-sales',
       '/medicines',
       '/categories',
       '/inventory',
