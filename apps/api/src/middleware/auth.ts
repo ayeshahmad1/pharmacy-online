@@ -49,6 +49,15 @@ export const SALE_MANAGERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly
  */
 export const RETURN_APPROVERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
 
+/** Who may see reports and the dashboard (sales, profit, cost prices, cash closing). */
+export const REPORT_VIEWERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
+
+/**
+ * Who may acknowledge alerts and run the alerts check on demand. Every role
+ * can read alerts.
+ */
+export const ALERT_MANAGERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
+
 /** Allows the request only if the authenticated user has one of the given roles. */
 export function requireRole(...roles: RoleCode[]): RequestHandler {
   return (req, _res, next) => {

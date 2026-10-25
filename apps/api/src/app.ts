@@ -4,11 +4,13 @@ import express from 'express';
 import { pinoHttp } from 'pino-http';
 import { logger } from './lib/logger';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
+import { alertsRouter } from './modules/alerts/alerts.routes';
 import { authRouter } from './modules/auth/auth.routes';
 import { categoriesRouter } from './modules/categories/categories.routes';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
 import { medicinesRouter } from './modules/medicines/medicines.routes';
 import { offlineSalesRouter } from './modules/offline-sales/offline-sales.routes';
+import { reportsRouter } from './modules/reports/reports.routes';
 import { returnsRouter } from './modules/returns/returns.routes';
 import { salesRouter } from './modules/sales/sales.routes';
 import { suppliersRouter } from './modules/suppliers/suppliers.routes';
@@ -46,6 +48,8 @@ export function createApp() {
   app.use('/api/sales', salesRouter);
   app.use('/api/returns', returnsRouter);
   app.use('/api/offline-sales', offlineSalesRouter);
+  app.use('/api/reports', reportsRouter);
+  app.use('/api/alerts', alertsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

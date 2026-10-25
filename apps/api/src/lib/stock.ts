@@ -43,3 +43,20 @@ export async function batchQuantities(db: Db, batchIds: string[]): Promise<Map<s
 export const batchQuantitySql = Prisma.sql`(
   SELECT COALESCE(SUM(sm."quantity"), 0)::int FROM "StockMovement" sm WHERE sm."batchId" = b."id"
 )`;
+
+/**
+ * Per-medicine stock totals for a lateral join on a Medicine row aliased `m`:
+ * `sellable` (not expired on `today`), `expired` (still on the shelf) and
+ * `nextExpiry` (earliest sellable batch with stock).
+ */
+export function medicineStockTotalsSql(today: string) {
+  return Prisma.sql`
+    SELECT
+      COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" > ${today}::date), 0)::int AS "sellable",
+      COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" <= ${today}::date), 0)::int AS "expired",
+      MIN(bs."expiryDate") FILTER (WHERE bs."expiryDate" > ${today}::date AND bs."qty" > 0) AS "nextExpiry"
+    FROM (
+      SELECT b."expiryDate", ${batchQuantitySql} AS "qty"
+      FROM "Batch" b WHERE b."medicineId" = m."id"
+    ) bs`;
+}

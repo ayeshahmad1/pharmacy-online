@@ -39,7 +39,12 @@ import {
 import { badRequest, conflict, insufficientStock, notFound } from '../../lib/errors';
 import { prisma } from '../../lib/prisma';
 import { escapeLike } from '../../lib/search';
-import { batchQuantities, batchQuantitySql, lockBatches } from '../../lib/stock';
+import {
+  batchQuantities,
+  batchQuantitySql,
+  lockBatches,
+  medicineStockTotalsSql,
+} from '../../lib/stock';
 
 /** Who is reading: decides whether purchase prices are shown. */
 export type Viewer = { role: RoleCode };
@@ -458,21 +463,8 @@ type StockRow = {
 function stockSql(today: string, where: Prisma.Sql) {
   return Prisma.sql`
     FROM "Medicine" m
-    CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    CROSS JOIN LATERAL (${medicineStockTotalsSql(today)}) s
     ${where}`;
-}
-
-/** The per-medicine totals subquery, for a lateral join on a Medicine row aliased `m`. */
-function stockTotalsSql(today: string) {
-  return Prisma.sql`
-    SELECT
-      COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" > ${today}::date), 0)::int AS "sellable",
-      COALESCE(SUM(bs."qty") FILTER (WHERE bs."expiryDate" <= ${today}::date), 0)::int AS "expired",
-      MIN(bs."expiryDate") FILTER (WHERE bs."expiryDate" > ${today}::date AND bs."qty" > 0) AS "nextExpiry"
-    FROM (
-      SELECT b."expiryDate", ${batchQuantitySql} AS "qty"
-      FROM "Batch" b WHERE b."medicineId" = m."id"
-    ) bs`;
 }
 
 const stockColumns = Prisma.sql`
@@ -590,7 +582,7 @@ export async function searchSellable(query: SellableSearchQuery): Promise<Sellab
       ORDER BY "rank", m."name", m."id"
       LIMIT ${query.limit}
     ) m
-    CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    CROSS JOIN LATERAL (${medicineStockTotalsSql(today)}) s
     ORDER BY m."rank", m."name", m."id"`;
   return rows.map(toSellableDto);
 }
@@ -598,7 +590,7 @@ export async function searchSellable(query: SellableSearchQuery): Promise<Sellab
 async function sellableRow(medicineId: string, today: string): Promise<SellableRow> {
   const [row] = await prisma.$queryRaw<SellableRow[]>`
     SELECT ${sellableColumns}, false AS "barcodeMatch"
-    FROM "Medicine" m CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    FROM "Medicine" m CROSS JOIN LATERAL (${medicineStockTotalsSql(today)}) s
     WHERE m."id" = ${medicineId}::uuid`;
   if (!row) throw notFound('Medicine not found');
   return row;
@@ -684,7 +676,7 @@ export async function listSubstitutes(medicineId: string): Promise<SubstitutesDt
   // trigram index on genericName.
   const rows = await prisma.$queryRaw<SellableRow[]>`
     SELECT ${sellableColumns}, false AS "barcodeMatch"
-    FROM "Medicine" m CROSS JOIN LATERAL (${stockTotalsSql(today)}) s
+    FROM "Medicine" m CROSS JOIN LATERAL (${medicineStockTotalsSql(today)}) s
     WHERE m."status" = 'ACTIVE'
       AND m."id" <> ${medicineId}::uuid
       AND m."genericName" ILIKE ${escapeLike(row.genericName)}

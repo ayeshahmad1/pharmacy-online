@@ -1,3 +1,4 @@
+import { validate as isValidCron } from 'node-cron';
 import { z } from 'zod';
 
 // Load apps/api/.env in development. In production, PM2 provides the
@@ -42,6 +43,20 @@ const envSchema = z.object({
   CASHIER_MAX_DISCOUNT_PERCENT: z.coerce.number().int().min(0).max(100).default(10),
   /** Offline sales reaching the server later than this after they were made are refused. */
   OFFLINE_SALE_MAX_AGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+
+  /**
+   * When the alerts job re-checks stock and expiry (cron syntax, in
+   * BUSINESS_TIMEZONE). It also runs once at startup. "off" disables it.
+   */
+  ALERTS_CRON: z
+    .string()
+    .trim()
+    .default('*/15 * * * *')
+    .refine((v) => v === 'off' || isValidCron(v), 'Must be a cron expression or "off"'),
+  /** Batches with stock expiring within this many days raise an alert. */
+  ALERT_EXPIRY_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  /** A medicine in stock with no sale for this many days counts as dead stock. */
+  DEAD_STOCK_DAYS: z.coerce.number().int().min(7).max(730).default(60),
 });
 
 function isValidTimeZone(tz: string): boolean {
