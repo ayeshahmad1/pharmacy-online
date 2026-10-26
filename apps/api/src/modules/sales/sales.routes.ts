@@ -17,6 +17,7 @@ salesRouter.use(authenticate);
 
 salesRouter.post('/', validate({ body: createSaleBodySchema }), controller.create);
 salesRouter.get('/', validate({ query: listSalesQuerySchema }), controller.list);
+salesRouter.get('/cashiers', requireRole(...SALE_MANAGERS), controller.cashiers);
 salesRouter.get('/:id', validate({ params: idParamsSchema }), controller.get);
 salesRouter.post(
   '/:id/void',

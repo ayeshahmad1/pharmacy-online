@@ -546,6 +546,7 @@ export async function getReturnable(query: ReturnableQuery): Promise<ReturnableS
       returnedQuantity: r.completed,
       pendingQuantity: r.pending,
       returnableQuantity: item.quantity - r.completed - r.pending,
+      refundableAmount: formatPaisa(toPaisa(item.lineTotal) - r.refund),
     };
   });
   const refundable = PAYMENT_METHODS.flatMap((method) => {

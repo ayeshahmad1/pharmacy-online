@@ -7,6 +7,7 @@ import type {
   SaleDto,
   SaleItemDto,
   SaleSummaryDto,
+  SaleUserRef,
   VoidSaleBody,
 } from '@pharmacy/shared';
 import type { Prisma } from '@prisma/client';
@@ -623,4 +624,17 @@ export async function listSales(
     }),
   ]);
   return { items: rows.map(toSummaryDto), total, page: query.page, pageSize: query.pageSize };
+}
+
+/**
+ * Everyone who has rung up a sale, for the sales list's cashier filter. Any
+ * role can sell, so this is not limited to cashiers; inactive users who sold
+ * before stay listed, since their sales do.
+ */
+export async function listSaleCashiers(): Promise<SaleUserRef[]> {
+  return prisma.user.findMany({
+    where: { sales: { some: {} } },
+    select: userRef.select,
+    orderBy: [{ fullName: 'asc' }, { username: 'asc' }],
+  });
 }

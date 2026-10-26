@@ -164,6 +164,12 @@ export type ReturnableLineDto = SaleItemDto & {
   /** Units on returns waiting for approval; they can't be returned again. */
   pendingQuantity: number;
   returnableQuantity: number;
+  /**
+   * What is left of the line's paid total once completed and pending refunds
+   * are taken off. Returning every remaining unit refunds exactly this; fewer
+   * units refund lineTotal × quantity ÷ sold, rounded down to the paisa.
+   */
+  refundableAmount: string;
 };
 
 /** What a method can still refund: paid that way minus completed and pending refunds. */

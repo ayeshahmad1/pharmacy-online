@@ -1,7 +1,8 @@
+import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { addDays, businessToday, startOfBusinessDay } from '../src/lib/dates';
 import { prisma } from '../src/lib/prisma';
-import { auditEntries, authAs, ledgerQuantity, resetDatabase } from './helpers';
+import { app, auditEntries, authAs, ledgerQuantity, resetDatabase } from './helpers';
 import {
   card,
   cash,
@@ -368,5 +369,39 @@ describe('GET /api/sales', () => {
     const { pharmacist } = await salesSetup();
     const res = await listSales(pharmacist.auth, { from: '2026-10-23', to: '2026-10-22' });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/sales/cashiers', () => {
+  it('lists everyone who has rung up a sale, for managers only', async () => {
+    const ctx = await salesSetup();
+    const m = await ctx.medicine('Panadol 500mg');
+    await ctx.batch(m.id, 30, 100);
+    await sell(ctx.cashier.auth, {
+      items: [{ medicineId: m.id, quantity: 1 }],
+      payments: [cash('10')],
+    });
+    // Has never sold: not offered as a filter.
+    await authAs('CASHIER', 'idle.cashier');
+
+    const res = await request(app)
+      .get('/api/sales/cashiers')
+      .set('Authorization', ctx.pharmacist.auth);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      cashiers: [
+        {
+          id: ctx.cashier.user.id,
+          username: ctx.cashier.user.username,
+          fullName: ctx.cashier.user.fullName,
+        },
+      ],
+    });
+
+    const asCashier = await request(app)
+      .get('/api/sales/cashiers')
+      .set('Authorization', ctx.cashier.auth);
+    expect(asCashier.status).toBe(403);
   });
 });

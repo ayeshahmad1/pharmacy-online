@@ -275,6 +275,8 @@ describe('GET /api/returns/returnable', () => {
       [lineA.id, 1, 0, 2],
       [lineB.id, 0, 2, 5],
     ]);
+    // 75.00 paid for line A less 25.00 refunded; 175.00 for line B less 50.00 pending.
+    expect(body.lines.map((l) => l.refundableAmount)).toEqual(['50.00', '125.00']);
     expect(body.refundable).toEqual([
       { method: 'CASH', paid: '150.00', available: '75.00' },
       { method: 'CARD', paid: '100.00', available: '100.00' },

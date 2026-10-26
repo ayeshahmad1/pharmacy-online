@@ -19,6 +19,10 @@ export const list: RequestHandler = async (req, res) => {
   res.json(await service.listSales(req.query as unknown as ListSalesQuery, viewer(req)));
 };
 
+export const cashiers: RequestHandler = async (_req, res) => {
+  res.json({ cashiers: await service.listSaleCashiers() });
+};
+
 export const get: RequestHandler = async (req, res) => {
   res.json({ sale: await service.getSale(params(req).id, viewer(req)) });
 };
