@@ -99,6 +99,13 @@ describe('parseForm', () => {
       data: { email: null },
     });
   });
+
+  it('says plainly when an email is not valid', () => {
+    expect(parseForm(createSupplierBodySchema, { name: 'Ali Traders', email: 'ali@' })).toEqual({
+      ok: false,
+      errors: { email: 'Enter a valid email address' },
+    });
+  });
 });
 
 describe('intInput', () => {

@@ -16,6 +16,7 @@ type Issue = {
   minimum?: unknown;
   maximum?: unknown;
   origin?: unknown;
+  format?: unknown;
 };
 
 /** The structural slice of a Zod schema this needs; the web app does not import zod itself. */
@@ -74,7 +75,7 @@ export function friendlyMessage(issue: Issue, value: unknown): string {
         ? `At most ${String(issue.maximum)} characters`
         : `Must be at most ${String(issue.maximum)}`;
     case 'invalid_format':
-      return 'Invalid format';
+      return issue.format === 'email' ? 'Enter a valid email address' : 'Invalid format';
     default:
       return issue.message;
   }
