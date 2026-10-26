@@ -96,6 +96,21 @@ behind Nginx in production. Start the API first.
   automatically after each sale if ticked on that device). Set the printer's paper to the 80mm roll.
   Header and footer come from `VITE_PHARMACY_NAME`, `VITE_PHARMACY_ADDRESS`, `VITE_PHARMACY_PHONE`
   and `VITE_RECEIPT_FOOTER` in `apps/web/.env`.
+- **Sales (every role; cashiers see "My sales", only their own):** list by receipt number, status,
+  date range and (admin, pharmacist) cashier, from `GET /api/sales/cashiers` (everyone who has sold).
+  A sale's page shows its lines per batch, discounts, payments, change and the returns against it;
+  **Reprint receipt** (or `P`) prints the 80mm receipt again. Admins and pharmacists **void** a
+  completed sale with a reason; the button says why when a return is pending or done.
+- **Returns (every role; cashiers see only the returns they raised):** **New return** finds the sale
+  by its receipt number (or opens from the sale's **Return items**), then takes quantities per sale
+  line, back-on-shelf yes/no (never for an expired batch) and a reason. The refund shown is the one
+  the API will make (each line's paid total pro rata, the last units taking what is left, from
+  `refundableAmount` on `GET /api/returns/returnable`); it goes back cash first, then card, then
+  wallet unless staff choose the split. A cashier's return waits as _Awaiting approval_ until an
+  admin or pharmacist approves or rejects it (with a reason) on its page.
+- **Users (admin):** list with role, status and search; create, edit name/email/role, reset a
+  password (signs the user out everywhere), deactivate and activate. Your own role and deactivating
+  yourself are locked, with the reason shown.
 - **Dashboard and reports (admin, pharmacist):** the dashboard shows today against yesterday, the
   month so far, the last 30 days (revenue and gross profit), best sellers, today's payment mix and
   what needs attention. **Reports** has tabs for sales by day/week/month, profit and margin per

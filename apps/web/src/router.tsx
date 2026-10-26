@@ -10,10 +10,15 @@ import { ReceiveStockPage } from '@/features/inventory/receive-stock-page';
 import { MedicineDetailPage } from '@/features/medicines/medicine-detail-page';
 import { MedicinesPage } from '@/features/medicines/medicines-page';
 import { OfflineSalesPage } from '@/features/offline-sales/offline-sales-page';
+import { NewReturnPage } from '@/features/returns/new-return-page';
+import { ReturnDetailPage } from '@/features/returns/return-detail-page';
+import { ReturnsPage } from '@/features/returns/returns-page';
+import { SaleDetailPage } from '@/features/sales/sale-detail-page';
+import { SalesPage } from '@/features/sales/sales-page';
 import { SuppliersPage } from '@/features/suppliers/suppliers-page';
+import { UsersPage } from '@/features/users/users-page';
 import { ADMIN_ONLY, ALL_ROLES, STAFF_ROLES } from '@/lib/navigation';
 import { NotFoundPage } from '@/pages/not-found-page';
-import { PlaceholderPage } from '@/pages/placeholder-page';
 
 // Route roles must match the `roles` of the matching item in lib/navigation.ts.
 export const router = createBrowserRouter([
@@ -29,8 +34,11 @@ export const router = createBrowserRouter([
             element: <RequireRole roles={ALL_ROLES} />,
             children: [
               { path: 'billing', element: <BillingPage /> },
-              { path: 'sales', element: <PlaceholderPage title="Sales" /> },
-              { path: 'returns', element: <PlaceholderPage title="Returns" /> },
+              { path: 'sales', element: <SalesPage /> },
+              { path: 'sales/:id', element: <SaleDetailPage /> },
+              { path: 'returns', element: <ReturnsPage /> },
+              { path: 'returns/new', element: <NewReturnPage /> },
+              { path: 'returns/:id', element: <ReturnDetailPage /> },
               { path: 'offline-sales', element: <OfflineSalesPage /> },
               { path: 'alerts', element: <AlertsPage /> },
             ],
@@ -61,7 +69,7 @@ export const router = createBrowserRouter([
           },
           {
             element: <RequireRole roles={ADMIN_ONLY} />,
-            children: [{ path: 'users', element: <PlaceholderPage title="Users" /> }],
+            children: [{ path: 'users', element: <UsersPage /> }],
           },
           { path: '*', element: <NotFoundPage /> },
         ],
