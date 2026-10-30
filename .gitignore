@@ -6,3 +6,7 @@ coverage/
 .env.*
 !.env.example
 .DS_Store
+
+# Legacy MongoDB samples and migration logs (may contain customer data)
+migration-samples/
+migration-output/

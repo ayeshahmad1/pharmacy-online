@@ -68,36 +68,37 @@ and refuses to run with a bad value, printing the variable names (never the valu
 
 ### API (`apps/api/.env`, production: `shared/api.env`)
 
-| Variable                          | Default              | Notes                                                                                          |
-| --------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                        | `development`        | `production` on the server: secure cookies, strict checks, no sample data in the seed          |
-| `DATABASE_URL`                    | (required)           | `postgresql://user:password@localhost:5432/pharmacy_pos?schema=public`                         |
-| `PORT` / `HOST`                   | `4000` / `127.0.0.1` | Keep loopback: only Nginx on the same machine talks to the API                                 |
-| `LOG_LEVEL`                       | `info`               | Pino JSON logs; authorization headers, cookies, passwords and tokens are redacted              |
-| `JWT_ACCESS_SECRET`               | (required)           | ≥ 32 characters, random. Production refuses the example value                                  |
-| `JWT_ACCESS_TTL_SECONDS`          | `900`                | Access token lifetime, 60–3600                                                                 |
-| `REFRESH_TOKEN_TTL_DAYS`          | `7`                  | Sign-in lifetime, 1–30; renewed on every refresh                                               |
-| `COOKIE_SECURE`                   | `true` in production | Refresh cookie HTTPS-only (`__Secure-pharmacy_rt`). `false` is refused in production           |
-| `BCRYPT_ROUNDS`                   | `12`                 | Password hashing cost                                                                          |
-| `TRUST_PROXY`                     | `loopback`           | Which proxies may set `X-Forwarded-*`; decides client IPs for rate limits and the audit log    |
-| `CORS_ORIGINS`                    | (empty)              | Extra browser origins allowed to call the API, comma-separated. Normally empty                 |
-| `RATE_LIMIT_ENABLED`              | `true`               | The API's own limits (Nginx has more in front)                                                 |
-| `RATE_LIMIT_API_PER_MINUTE`       | `600`                | Requests per client IP per minute. All tills share the pharmacy's public IP                    |
-| `RATE_LIMIT_LOGIN_ATTEMPTS`       | `10`                 | Failed sign-ins per username+IP per window (5× per IP across usernames). Successes don't count |
-| `RATE_LIMIT_LOGIN_WINDOW_MINUTES` | `15`                 |                                                                                                |
-| `SENTRY_DSN`                      | (unset)              | Send unexpected errors to Sentry. Unset: errors are only logged                                |
-| `SENTRY_ENVIRONMENT`              | `NODE_ENV`           |                                                                                                |
-| `APP_RELEASE`                     | (set by PM2)         | Deployed commit, from the release's `REVISION` file; shown by `/api/health`                    |
-| `BUSINESS_TIMEZONE`               | `Asia/Karachi`       | Decides "today" for expiry, receipt numbers and reports                                        |
-| `EXPIRY_WARNING_DAYS`             | `90`                 | Default window of the expiring-soon list                                                       |
-| `CASHIER_MAX_DISCOUNT_PERCENT`    | `10`                 | Largest bill discount a cashier may give                                                       |
-| `OFFLINE_SALE_MAX_AGE_DAYS`       | `7`                  | Older offline sales are flagged for review instead of saved                                    |
-| `ALERTS_CRON`                     | `*/15 * * * *`       | Alerts job schedule (pharmacy timezone), also runs at start-up; `off` disables                 |
-| `ALERT_EXPIRY_DAYS`               | `30`                 | Batches expiring within this raise an alert                                                    |
-| `DEAD_STOCK_DAYS`                 | `60`                 | Dead-stock report window                                                                       |
-| `SEED_ADMIN_USERNAME`             | (seed only)          | First admin account created by `db:seed`                                                       |
-| `SEED_ADMIN_PASSWORD`             | (seed only)          | Give it only for the seed run (see below); production refuses the placeholder                  |
-| `TEST_DATABASE_URL`               | (dev only)           | Test database; its name must end in `_test`                                                    |
+| Variable                          | Default              | Notes                                                                                                                     |
+| --------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                        | `development`        | `production` on the server: secure cookies, strict checks, no sample data in the seed                                     |
+| `DATABASE_URL`                    | (required)           | `postgresql://user:password@localhost:5432/pharmacy_pos?schema=public`                                                    |
+| `PORT` / `HOST`                   | `4000` / `127.0.0.1` | Keep loopback: only Nginx on the same machine talks to the API                                                            |
+| `LOG_LEVEL`                       | `info`               | Pino JSON logs; authorization headers, cookies, passwords and tokens are redacted                                         |
+| `JWT_ACCESS_SECRET`               | (required)           | ≥ 32 characters, random. Production refuses the example value                                                             |
+| `JWT_ACCESS_TTL_SECONDS`          | `900`                | Access token lifetime, 60–3600                                                                                            |
+| `REFRESH_TOKEN_TTL_DAYS`          | `7`                  | Sign-in lifetime, 1–30; renewed on every refresh                                                                          |
+| `COOKIE_SECURE`                   | `true` in production | Refresh cookie HTTPS-only (`__Secure-pharmacy_rt`). `false` is refused in production                                      |
+| `BCRYPT_ROUNDS`                   | `12`                 | Password hashing cost                                                                                                     |
+| `TRUST_PROXY`                     | `loopback`           | Which proxies may set `X-Forwarded-*`; decides client IPs for rate limits and the audit log                               |
+| `CORS_ORIGINS`                    | (empty)              | Extra browser origins allowed to call the API, comma-separated. Normally empty                                            |
+| `RATE_LIMIT_ENABLED`              | `true`               | The API's own limits (Nginx has more in front)                                                                            |
+| `RATE_LIMIT_API_PER_MINUTE`       | `600`                | Requests per client IP per minute. All tills share the pharmacy's public IP                                               |
+| `RATE_LIMIT_LOGIN_ATTEMPTS`       | `10`                 | Failed sign-ins per username+IP per window (5× per IP across usernames). Successes don't count                            |
+| `RATE_LIMIT_LOGIN_WINDOW_MINUTES` | `15`                 |                                                                                                                           |
+| `SENTRY_DSN`                      | (unset)              | Send unexpected errors to Sentry. Unset: errors are only logged                                                           |
+| `SENTRY_ENVIRONMENT`              | `NODE_ENV`           |                                                                                                                           |
+| `APP_RELEASE`                     | (set by PM2)         | Deployed commit, from the release's `REVISION` file; shown by `/api/health`                                               |
+| `BUSINESS_TIMEZONE`               | `Asia/Karachi`       | Decides "today" for expiry, receipt numbers and reports                                                                   |
+| `EXPIRY_WARNING_DAYS`             | `90`                 | Default window of the expiring-soon list                                                                                  |
+| `CASHIER_MAX_DISCOUNT_PERCENT`    | `10`                 | Largest bill discount a cashier may give                                                                                  |
+| `OFFLINE_SALE_MAX_AGE_DAYS`       | `7`                  | Older offline sales are flagged for review instead of saved                                                               |
+| `ALERTS_CRON`                     | `*/15 * * * *`       | Alerts job schedule (pharmacy timezone), also runs at start-up; `off` disables                                            |
+| `ALERT_EXPIRY_DAYS`               | `30`                 | Batches expiring within this raise an alert                                                                               |
+| `DEAD_STOCK_DAYS`                 | `60`                 | Dead-stock report window                                                                                                  |
+| `SEED_ADMIN_USERNAME`             | (seed only)          | First admin account created by `db:seed`                                                                                  |
+| `SEED_ADMIN_PASSWORD`             | (seed only)          | Give it only for the seed run (see below); production refuses the placeholder                                             |
+| `TEST_DATABASE_URL`               | (dev only)           | Test database; its name must end in `_test`                                                                               |
+| `MONGO_URL` / `MONGO_DB`          | (migration only)     | Old MongoDB system, read by `migrate:mongo` (see [Migrating from the old system](#migrating-from-the-old-mongodb-system)) |
 
 ### Web app (`apps/web/.env`, production: `shared/web.env`)
 
@@ -399,6 +400,50 @@ are applied.
 
 **Test a restore every month** into a scratch database: a backup that was never restored is a hope,
 not a backup.
+
+## Migrating from the old MongoDB system
+
+`pnpm --filter api migrate:mongo` copies the old system's users, medicines, stock and sales into
+Postgres. It only reads from Mongo. It is a **dry run by default**: everything is written inside one
+transaction, checked against the database's constraints, totalled, and rolled back.
+
+**What is loaded and how** (decided in Session 13):
+
+| Mongo                       | Postgres                                                                                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                     | `User`. Passwords are kept (bcrypt); username = the part of the email before `@`. Roles admin/cashier                                                                           |
+| `medicines` (one per batch) | `Medicine` (category "Uncategorised", unit = `type`) + one `Batch`; the Mongo quantity is an opening-stock `ADJUSTMENT`                                                         |
+| `purchases`                 | Not rows: they give each batch its cost (latest priced delivery ÷ quantity; 0 when unknown, listed)                                                                             |
+| `sales`                     | `Sale` + `SaleItem` + one `CASH` `Payment`, with no stock movements (the opening stock already reflects them). New `S-YYYYMMDD-NNNN` numbers; the old bill number is in `notes` |
+| `sales` with `isReturn`     | Not loaded (they name no original sale); logged, and their total is shown in the comparison                                                                                     |
+| `billsequences`             | Not copied; receipt counters are rebuilt from the sales                                                                                                                         |
+
+Sales of medicines or by users deleted from Mongo get inactive placeholders ("Deleted item #abc123
+(old system)", `legacy-user-abc123`), so no sale is lost. Each loaded row is recorded in `LegacyIdMap`
+with its Mongo `_id`. Suppliers that are only numbers ("00") or "Return"/"Discount" become
+"Unknown supplier".
+
+**Run it:**
+
+1. Put `MONGO_URL` in `apps/api/.env` (a read-only Atlas user is enough).
+2. Point `DATABASE_URL` at an **empty** database with migrations applied and no seed; the script
+   refuses a database that already has medicines, sales, suppliers or categories:
+   ```bash
+   docker exec pharmacy-pos-postgres createdb -U pharmacy pharmacy_pos_migration
+   DATABASE_URL="postgresql://pharmacy:pharmacy_dev@localhost:5433/pharmacy_pos_migration?schema=public" pnpm --filter api db:deploy
+   ```
+3. Dry run, then read the output (also in `migration-output/<run>/`: `verification.txt`,
+   `rejects.jsonl`, `warnings.jsonl`, `stock-per-medicine.csv`):
+   ```bash
+   DATABASE_URL="postgresql://pharmacy:pharmacy_dev@localhost:5433/pharmacy_pos_migration?schema=public" pnpm --filter api migrate:mongo
+   ```
+   It must show `loaded + rejected = Mongo sales` and every medicine's stock matching. Fix anything
+   rejected in the old system and run again.
+4. **Cut-over:** stop selling in the old system (receipt numbers and opening stock are taken from
+   the data as it is at that moment), run the dry run once more, then the same command with
+   `--commit`. Commit mode writes one transaction per batch of 500 (`--batch-size`); if it stops
+   part-way, run it again and it skips what is already loaded. Then sign in as one of the old
+   admins and set up the categories, barcodes, generic names, reorder levels and missing cost prices.
 
 ## Runbook
 

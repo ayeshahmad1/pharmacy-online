@@ -36,6 +36,7 @@ export const AUDIT_ACTIONS = [
   'OFFLINE_SALE_DISMISS',
   'ALERTS_REFRESH',
   'ALERT_ACKNOWLEDGE',
+  'LEGACY_IMPORT',
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 

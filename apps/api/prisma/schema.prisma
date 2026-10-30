@@ -526,3 +526,23 @@ model AuditLog {
   @@index([userId, createdAt])
   @@index([createdAt])
 }
+
+// ─── Legacy data migration ──────────────────────────────────────────────────
+
+/// Links rows loaded from the old MongoDB system to the Mongo document they
+/// came from (src/migration/mongo). One legacy document can yield several
+/// rows: a Mongo medicine becomes a Medicine and its Batch.
+model LegacyIdMap {
+  /// Mongo collection, e.g. "medicines". Derived rows use a pseudo source
+  /// such as "medicines.supplier".
+  source    String
+  /// Mongo _id as hex, or the derived key (e.g. a normalised supplier name).
+  legacyId  String
+  /// Our model the row was loaded into, e.g. "Medicine" or "Batch".
+  entity    String
+  newId     String   @db.Uuid
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  @@id([source, legacyId, entity])
+  @@index([entity, newId])
+}

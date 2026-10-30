@@ -22,6 +22,7 @@ apps/
       middleware/ (auth, roles, error handler, validate)
       lib/ (prisma client, logger, config)
       jobs/ (cron: alerts, backups)
+      migration/mongo/ (one-off import from the old MongoDB system)
       server.ts
   web/
     src/
@@ -64,6 +65,11 @@ packages/shared/src/ (zod schemas, types, constants)
     - Cash closing is on a **drawer basis**: day D = cash/card/wallet taken on every sale rung up on D (even if voided later) − payments of sales voided on D − refunds of returns completed on D, whatever day those were sold. Sales are attributed to the cashier, voids to whoever voided, refunds to whoever raised the return. Open offline conflicts and pending returns are flagged, not counted.
     - Dead stock: sellable stock with no (non-voided) sale for `DEAD_STOCK_DAYS` (default 60) that was already in stock before that window.
     - Alerts are raised by the node-cron alerts job (`ALERTS_CRON`, default every 15 min, plus at startup, one run at a time via an advisory lock): OUT_OF_STOCK / LOW_STOCK per active medicine that has been stocked before (sellable ≤ reorder level), EXPIRING_SOON per batch with stock expiring within `ALERT_EXPIRY_DAYS` (default 30), EXPIRED per expired batch still in stock. One unresolved alert per condition (`Alert.openKey`); it resolves itself when the condition goes, and a later recurrence is a new alert. Every role sees alerts and the badge; ADMIN/PHARMACIST acknowledge (shared, for everyone).
+
+15. **Migration from the old MongoDB system** (decided in Session 13), `src/migration/mongo/`:
+    - The old purchase/sale history doesn't add up to its stock, so each batch's Mongo quantity is loaded as one opening `ADJUSTMENT` movement, and legacy sales are loaded as history (sale, lines, one CASH payment) **without** stock movements.
+    - Legacy returns (negative "sales" with no original sale) are not loaded; they are logged and their total shown. Sales of medicines/users deleted from Mongo get inactive placeholders. Batch cost = latest priced purchase ÷ quantity, else 0 (listed).
+    - Dry run by default (one transaction, rolled back after the verification totals); `--commit` writes per batch and resumes via `LegacyIdMap`. Rejected documents are logged to `rejects.jsonl`, never dropped silently. Only into an empty database.
 
 ## Architecture rules
 
