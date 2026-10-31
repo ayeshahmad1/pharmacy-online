@@ -143,6 +143,58 @@ Layout on the server:
 /var/log/pharmacy-pos/      API logs (PM2) and backup log
 ```
 
+### 0. Order the server and secure the login (Contabo)
+
+Any provider with a plain Ubuntu 24.04 VM works. These are the choices on Contabo, whose Cloud VPS
+10 (4 vCPU, 8 GB RAM) is plenty for one pharmacy. Turn off any VPN while signing up and use the
+card holder's real name and address; Contabo may ask for ID before it provisions the server.
+
+| Order option   | Choose                                                                                            |
+| -------------- | ------------------------------------------------------------------------------------------------- |
+| Product        | Cloud VPS 10                                                                                      |
+| Term           | 12 months (lower price, usually no setup fee) or monthly                                          |
+| Region         | European Union (Germany), no surcharge; Singapore or India if their surcharge is fine             |
+| Storage        | NVMe (75 GB), not the larger, slower SSD option                                                   |
+| Image          | Ubuntu 24.04, plain OS: no cPanel, Plesk, Webmin or app images                                    |
+| Login          | A long generated root password, kept in a password manager; your SSH key if offered               |
+| Object Storage | No: off-site backups go to a different provider (step 7)                                          |
+| Auto Backup    | Optional: restores the whole server in minutes. The data is safe in the off-site dumps either way |
+
+The provisioning email gives the server's IP. Log in once as root with the password, create the
+admin user that runs every later step, and leave:
+
+```bash
+ssh root@SERVER_IP
+adduser yourname && usermod -aG sudo yourname
+hostnamectl set-hostname pharmacy-pos
+exit
+```
+
+On your computer, make an SSH key if you have none (`ssh-keygen -t ed25519`, with a passphrase)
+and copy it to the new user. From Windows PowerShell (Linux/macOS: `ssh-copy-id yourname@SERVER_IP`):
+
+```powershell
+Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub | ssh yourname@SERVER_IP "mkdir -p -m 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+```
+
+Check in a new terminal that `ssh yourname@SERVER_IP` gets in with the key and `sudo whoami` prints
+`root`. Then turn off root and password logins. Provider images often switch password login on in
+`/etc/ssh/sshd_config.d/`, and sshd keeps the first value it reads, so the setting goes in a file
+that sorts first:
+
+```bash
+printf 'PermitRootLogin no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n' \
+  | sudo tee /etc/ssh/sshd_config.d/00-hardening.conf
+sudo sshd -t && sudo systemctl restart ssh
+```
+
+Keep that session open until a fresh `ssh yourname@SERVER_IP` works.
+
+Point the domain at the server now, so DNS has spread by step 8: an A record for `pos.example.com`
+to the server's IPv4, plus an AAAA record if `ip -6 addr show scope global` shows an address. On
+Cloudflare set both to **DNS only** (grey cloud): through Cloudflare's proxy every request would
+come from Cloudflare's addresses, and the per-IP rate limits would treat all users as one.
+
 ### 1. Base system and firewall
 
 ```bash
@@ -161,9 +213,9 @@ sudo ufw enable
 sudo ufw status verbose
 ```
 
-Use SSH keys and turn off password login (`PasswordAuthentication no` in
-`/etc/ssh/sshd_config`, then `sudo systemctl restart ssh`) once your key works. On a 2 GB VPS add
-swap so builds cannot run out of memory:
+Root and password logins should already be off (step 0). If the provider has its own firewall in
+its control panel, allow only TCP 22, 80 and 443 there too. With less than 4 GB of RAM add swap so
+builds cannot run out of memory (not needed on the 8 GB Contabo plan):
 `sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile && echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab`.
 
 ### 2. Node.js 22, pnpm and PM2
@@ -258,6 +310,10 @@ pm2 save
 exit
 ```
 
+**Migrating from the old MongoDB system?** Don't seed: the migration only loads into an empty
+database and brings the old admins with their passwords. Run just `sudo -iu pharmacy pm2 save`,
+finish the steps below, then load the data as in [Into production](#into-production).
+
 Start PM2 at boot (it prints a command; it is the same as this):
 
 ```bash
@@ -284,6 +340,12 @@ nano /opt/pharmacy-pos/shared/backup.env  # BACKUP_REMOTE=offsite:pharmacy-pos-b
 /opt/pharmacy-pos/current/deploy/scripts/backup-db.sh manual   # must end with "Done"
 exit
 ```
+
+With **Backblaze B2**: create a private bucket (e.g. `pharmacy-pos-backups`) and an application key
+limited to that bucket, and in the bucket's Lifecycle Settings choose **Keep only the last version**
+(otherwise files the script deletes are only hidden, and still billed). In `rclone config` pick the
+storage type **Backblaze B2**, name the remote `offsite`, and paste the keyID as `account` and the
+application key as `key`. The manual backup above should then show up in the bucket.
 
 ### 8. Nginx and HTTPS (Let's Encrypt)
 
@@ -326,6 +388,24 @@ sudo -iu pharmacy pm2 status                   # pharmacy-pos-api online
 Open `https://pos.example.com`, sign in as the admin, create staff accounts under **Users**, then
 on each till install the app (browser menu → Install) and sign in once while online so it can cache
 the catalogue for offline billing.
+
+### 10. Monitoring and a safety net before go-live
+
+- **Missed backups:** a [healthchecks.io](https://healthchecks.io) check (period 1 day, grace 2
+  hours) with its ping URL as `BACKUP_HEALTHCHECK_URL` in `shared/backup.env`.
+- **Downtime:** an uptime monitor (e.g. UptimeRobot) on `https://pos.example.com/api/health/ready`
+  every 5 minutes. `/api/health*` is never rate-limited.
+- **Errors (optional):** `SENTRY_DSN` in `shared/api.env`, then
+  `sudo -iu pharmacy pm2 reload pharmacy-pos-api` so the API reads it.
+
+Before the first real sale:
+
+1. Restore one **off-site** backup into a scratch database (see [Backups and restore](#backups-and-restore)),
+   to prove that the key and the procedure work.
+2. Keep copies of `shared/api.env`, `shared/web.env`, `shared/backup.env` and `shared/backup.key` in
+   a password manager. With them and the off-site dumps the system can be rebuilt on any server.
+3. Take a snapshot of the finished server in the provider's control panel, and again before big
+   changes.
 
 ## Updates and rollback
 
@@ -444,6 +524,29 @@ with its Mongo `_id`. Suppliers that are only numbers ("00") or "Return"/"Discou
    `--commit`. Commit mode writes one transaction per batch of 500 (`--batch-size`); if it stops
    part-way, run it again and it skips what is already loaded. Then sign in as one of the old
    admins and set up the categories, barcodes, generic names, reorder levels and missing cost prices.
+
+### Into production
+
+On the server, in place of `db:seed` (deployment step 6). A release's `apps/api/.env` is the live
+`shared/api.env`, so the script reads and writes the production database. Don't add medicines or
+ring test sales before it: it refuses a database that already has any.
+
+1. In MongoDB Atlas → Network Access, allow the server's IP.
+2. Dry run (the URL is typed, so it stays out of files and shell history):
+   ```bash
+   sudo -iu pharmacy
+   cd /opt/pharmacy-pos/current
+   read -rsp 'Mongo URL: ' MONGO_URL; echo; export MONGO_URL
+   pnpm --filter api migrate:mongo
+   ```
+3. At cut-over, after the final dry run, the same command with `--commit`. Then copy the output
+   out of the release (old releases are deleted after five newer deploys), clear the URL and remove
+   the server's IP from Atlas:
+   ```bash
+   cp -r /opt/pharmacy-pos/current/migration-output ~/
+   unset MONGO_URL
+   exit
+   ```
 
 ## Runbook
 
