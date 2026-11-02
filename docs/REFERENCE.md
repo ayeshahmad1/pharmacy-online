@@ -7,30 +7,32 @@ runbook are in the [README](../README.md); business rules are in [CLAUDE.md](../
 
 `pnpm --filter api dev` starts the API on http://localhost:4000.
 
-| Endpoint                                                    | Who               | Notes                                                                                      |
-| ----------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
-| `POST /api/auth/login`                                      | anyone            | `{ username, password }` → access token + user                                             |
-| `POST /api/auth/refresh`                                    | cookie            | Rotates the refresh cookie, returns a new access token                                     |
-| `POST /api/auth/logout`                                     | cookie            | Revokes the refresh token, clears the cookie                                               |
-| `GET /api/auth/me`                                          | any user          | Current user                                                                               |
-| `GET /api/health`                                           | anyone            | Liveness: `{ status, release, uptimeSeconds }`, never touches the database                 |
-| `GET /api/health/ready`                                     | anyone            | Readiness: 200 if Postgres answers within 2 s, else 503                                    |
-| `GET /api/ping`                                             | anyone            | 204; the web app's connectivity probe                                                      |
-| `GET/POST /api/users`                                       | ADMIN             | List (`q`, `role`, `status`, `page`, `pageSize`) / create                                  |
-| `GET/PATCH /api/users/:id`                                  | ADMIN             | Get / update name, email, role                                                             |
-| `POST /api/users/:id/deactivate`                            | ADMIN             | Also revokes the user's sessions                                                           |
-| `POST /api/users/:id/activate`                              | ADMIN             |                                                                                            |
-| `POST /api/users/:id/reset-password`                        | ADMIN             | `{ newPassword }`; revokes the user's sessions                                             |
-| `GET /api/medicines`                                        | any user          | Search `q` (name or generic/salt name, ranked), `categoryId`, `status`, `page`, `pageSize` |
-| `GET /api/medicines/:id`                                    | any user          |                                                                                            |
-| `POST /api/medicines`                                       | ADMIN, PHARMACIST | `sellingPrice` is a decimal string, e.g. `"120.50"`                                        |
-| `PATCH /api/medicines/:id`                                  | ADMIN, PHARMACIST | Partial update; send `null`/`""` to clear an optional field                                |
-| `GET /api/categories`, `GET /api/suppliers`                 | any user          | `q`, `status`, `page`, `pageSize`                                                          |
-| `GET /api/categories/:id`, `GET /api/suppliers/:id`         | any user          |                                                                                            |
-| `POST /api/categories`, `POST /api/suppliers`               | ADMIN, PHARMACIST | Names are unique, ignoring case                                                            |
-| `PATCH /api/categories/:id`, `PATCH /api/suppliers/:id`     | ADMIN, PHARMACIST |                                                                                            |
-| `POST /api/{medicines,categories,suppliers}/:id/deactivate` | ADMIN, PHARMACIST | Soft: the row is kept; there is no DELETE                                                  |
-| `POST /api/{medicines,categories,suppliers}/:id/activate`   | ADMIN, PHARMACIST |                                                                                            |
+| Endpoint                                                    | Who               | Notes                                                                                                                          |
+| ----------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `POST /api/auth/login`                                      | anyone            | `{ username, password }` → access token + user                                                                                 |
+| `POST /api/auth/refresh`                                    | cookie            | Rotates the refresh cookie, returns a new access token                                                                         |
+| `POST /api/auth/logout`                                     | cookie            | Revokes the refresh token, clears the cookie                                                                                   |
+| `GET /api/auth/me`                                          | any user          | Current user                                                                                                                   |
+| `GET /api/health`                                           | anyone            | Liveness: `{ status, release, uptimeSeconds }`, never touches the database                                                     |
+| `GET /api/health/ready`                                     | anyone            | Readiness: 200 if Postgres answers within 2 s, else 503                                                                        |
+| `GET /api/ping`                                             | anyone            | 204; the web app's connectivity probe                                                                                          |
+| `GET/POST /api/users`                                       | ADMIN             | List (`q`, `role`, `status`, `page`, `pageSize`) / create                                                                      |
+| `GET/PATCH /api/users/:id`                                  | ADMIN             | Get / update name, email, role                                                                                                 |
+| `POST /api/users/:id/deactivate`                            | ADMIN             | Also revokes the user's sessions                                                                                               |
+| `POST /api/users/:id/activate`                              | ADMIN             |                                                                                                                                |
+| `POST /api/users/:id/reset-password`                        | ADMIN             | `{ newPassword }`; revokes the user's sessions                                                                                 |
+| `GET /api/medicines`                                        | any user          | Search `q` (name or generic/salt name, ranked), `categoryId`, `status`, `page`, `pageSize`                                     |
+| `GET /api/medicines/:id`                                    | any user          |                                                                                                                                |
+| `POST /api/medicines`                                       | ADMIN, PHARMACIST | `sellingPrice` is a decimal string, e.g. `"120.50"`                                                                            |
+| `PATCH /api/medicines/:id`                                  | ADMIN, PHARMACIST | Partial update; send `null`/`""` to clear an optional field                                                                    |
+| `GET /api/categories`, `GET /api/suppliers`                 | any user          | `q`, `status`, `page`, `pageSize`                                                                                              |
+| `GET /api/categories/:id`, `GET /api/suppliers/:id`         | any user          |                                                                                                                                |
+| `POST /api/categories`, `POST /api/suppliers`               | ADMIN, PHARMACIST | Names are unique, ignoring case                                                                                                |
+| `PATCH /api/categories/:id`, `PATCH /api/suppliers/:id`     | ADMIN, PHARMACIST |                                                                                                                                |
+| `POST /api/{medicines,categories,suppliers}/:id/deactivate` | ADMIN, PHARMACIST | Soft: the row is kept; there is no DELETE                                                                                      |
+| `POST /api/{medicines,categories,suppliers}/:id/activate`   | ADMIN, PHARMACIST |                                                                                                                                |
+| `GET /api/legacy/purchases`                                 | ADMIN, PHARMACIST | Old-system deliveries, newest first: `q` (medicine/generic name), `medicineId`, `supplierId`, `from`, `to`, `page`, `pageSize` |
+| `GET /api/legacy/returns`                                   | ADMIN, PHARMACIST | Old-system returns with their lines: `q`, `medicineId`, `cashierId`, `from`, `to`, `page`, `pageSize`                          |
 
 Send the access token as `Authorization: Bearer <token>`. The refresh token is an httpOnly cookie
 (`pharmacy_rt`, or `__Secure-pharmacy_rt` over HTTPS; path `/api/auth`), so the browser sends it
@@ -130,6 +132,10 @@ behind Nginx in production. Start the API first.
   returned to the shelf. Cash closing follows the drawer instead: every sale rung up that day, less
   voids and refunds paid back that day. Charts and report pages are code-split, so billing devices
   never download them.
+- **Old system records (admin, pharmacist):** the returns and deliveries loaded from the old MongoDB
+  system, read-only, with search by medicine and a date range. They never changed stock here and no
+  report, dashboard figure or cash closing counts them (old returns name no original sale). A
+  medicine's page also lists its old deliveries, when it has any.
 - **Alerts (every role sees them):** the API's alerts job (`ALERTS_CRON`, every 15 minutes and at
   startup) opens an alert per out-of-stock or low-stock medicine and per batch expiring within
   `ALERT_EXPIRY_DAYS` (default 30) or expired with stock on the shelf, and resolves it by itself once

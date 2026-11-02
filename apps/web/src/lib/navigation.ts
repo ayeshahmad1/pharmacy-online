@@ -1,5 +1,6 @@
 import { ROLE_CODES, type RoleCode } from '@pharmacy/shared';
 import {
+  ArchiveIcon,
   BarChart3Icon,
   BellIcon,
   BoxesIcon,
@@ -70,6 +71,8 @@ export const NAV_SECTIONS: NavSection[] = [
     title: 'Admin',
     items: [
       { path: '/reports', label: 'Reports', icon: BarChart3Icon, roles: STAFF_ROLES },
+      // Returns and deliveries loaded from the old system (rule 15), read-only.
+      { path: '/old-records', label: 'Old system records', icon: ArchiveIcon, roles: STAFF_ROLES },
       { path: '/users', label: 'Users', icon: UsersIcon, roles: ADMIN_ONLY },
     ],
   },

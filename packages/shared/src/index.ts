@@ -12,3 +12,4 @@ export * from './schemas/returns';
 export * from './schemas/offline-sales';
 export * from './schemas/reports';
 export * from './schemas/alerts';
+export * from './schemas/legacy';

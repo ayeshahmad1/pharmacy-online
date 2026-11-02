@@ -18,6 +18,7 @@ import { authRouter } from './modules/auth/auth.routes';
 import { categoriesRouter } from './modules/categories/categories.routes';
 import { healthRouter } from './modules/health/health.routes';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
+import { legacyRouter } from './modules/legacy/legacy.routes';
 import { medicinesRouter } from './modules/medicines/medicines.routes';
 import { offlineSalesRouter } from './modules/offline-sales/offline-sales.routes';
 import { reportsRouter } from './modules/reports/reports.routes';
@@ -89,6 +90,7 @@ export function createApp(overrides: Partial<AppOptions> = {}) {
   app.use('/api/offline-sales', offlineSalesRouter);
   app.use('/api/reports', reportsRouter);
   app.use('/api/alerts', alertsRouter);
+  app.use('/api/legacy', legacyRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

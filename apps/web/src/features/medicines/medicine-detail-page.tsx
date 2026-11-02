@@ -1,6 +1,7 @@
 import type { BatchStockDto, MedicineDto, MedicineStockDto } from '@pharmacy/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
+  ArchiveIcon,
   ArrowLeftIcon,
   BoxesIcon,
   HistoryIcon,
@@ -33,6 +34,8 @@ import { catalogKeys, medicinesApi } from '@/features/catalog/catalog-api';
 import { AdjustStockDialog } from '@/features/inventory/adjust-stock-dialog';
 import { inventoryApi, inventoryKeys } from '@/features/inventory/inventory-api';
 import { MOVEMENT_LABELS } from '@/features/inventory/movement-labels';
+import { legacyApi, legacyKeys } from '@/features/legacy/legacy-api';
+import { PurchasesTable } from '@/features/legacy/legacy-page';
 import { ApiError } from '@/lib/api';
 import { formatChange, formatDate, formatDateTime, formatQuantity } from '@/lib/format';
 import { formatMoney } from '@/lib/money';
@@ -121,6 +124,7 @@ export function MedicineDetailPage() {
       <MedicineFacts medicine={m} />
       <StockSection medicine={m} />
       <MovementsSection medicineId={m.id} />
+      <OldDeliveriesSection medicineId={m.id} />
 
       {editing && <MedicineFormDialog open onOpenChange={setEditing} medicine={m} />}
       <ActivationDialog
@@ -331,6 +335,54 @@ function StockSummary({ stock }: { stock: MedicineStockDto }) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Deliveries the old system recorded (rule 15). History only: they're already
+ * part of the opening stock. Hidden for medicines added after the switch.
+ */
+function OldDeliveriesSection({ medicineId }: { medicineId: string }) {
+  const [page, setPage] = useState(1);
+  const query = { medicineId, page, pageSize: 10 };
+  const deliveries = useQuery({
+    queryKey: legacyKeys.purchases(query),
+    queryFn: ({ signal }) => legacyApi.purchases(query, signal),
+    placeholderData: keepPreviousData,
+    staleTime: Infinity,
+  });
+  if (deliveries.isPending || (deliveries.isSuccess && deliveries.data.total === 0)) return null;
+
+  return (
+    <section className="space-y-3" aria-labelledby="old-deliveries-heading">
+      <div className="space-y-1">
+        <h3 id="old-deliveries-heading" className="flex items-center gap-2 text-lg font-semibold">
+          <ArchiveIcon className="size-5" /> Deliveries in the old system
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          For reference: these are already included in the opening stock and change nothing.
+        </p>
+      </div>
+      {deliveries.isError ? (
+        <ErrorState
+          error={deliveries.error}
+          onRetry={() => void deliveries.refetch()}
+          retrying={deliveries.isFetching}
+        />
+      ) : (
+        <div className={cn('space-y-3', deliveries.isPlaceholderData && 'opacity-60')}>
+          <div className="rounded-lg border">
+            <PurchasesTable items={deliveries.data.items} />
+          </div>
+          <Pagination
+            page={deliveries.data.page}
+            pageSize={deliveries.data.pageSize}
+            total={deliveries.data.total}
+            onPageChange={setPage}
+          />
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -21,6 +21,7 @@ describe('role-based navigation', () => {
     const paths = pathsFor('PHARMACIST');
     expect(paths).toContain('/inventory');
     expect(paths).toContain('/reports');
+    expect(paths).toContain('/old-records');
     expect(paths).not.toContain('/users');
   });
 
@@ -37,6 +38,7 @@ describe('role-based navigation', () => {
       '/suppliers',
       '/alerts',
       '/reports',
+      '/old-records',
       '/users',
     ]);
   });

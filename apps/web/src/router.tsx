@@ -7,6 +7,7 @@ import { BillingPage } from '@/features/billing/billing-page';
 import { CategoriesPage } from '@/features/categories/categories-page';
 import { InventoryPage } from '@/features/inventory/inventory-page';
 import { ReceiveStockPage } from '@/features/inventory/receive-stock-page';
+import { LegacyPage } from '@/features/legacy/legacy-page';
 import { MedicineDetailPage } from '@/features/medicines/medicine-detail-page';
 import { MedicinesPage } from '@/features/medicines/medicines-page';
 import { OfflineSalesPage } from '@/features/offline-sales/offline-sales-page';
@@ -59,6 +60,7 @@ export const router = createBrowserRouter([
               { path: 'inventory', element: <InventoryPage /> },
               { path: 'inventory/receive', element: <ReceiveStockPage /> },
               { path: 'suppliers', element: <SuppliersPage /> },
+              { path: 'old-records', element: <LegacyPage /> },
               {
                 path: 'reports',
                 lazy: async () => ({

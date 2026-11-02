@@ -53,6 +53,12 @@ export const RETURN_APPROVERS = ['ADMIN', 'PHARMACIST'] as const satisfies reado
 export const REPORT_VIEWERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
 
 /**
+ * Who may read the old system's deliveries and returns (CLAUDE.md rule 15):
+ * they show cost prices and every cashier's refunds.
+ */
+export const LEGACY_VIEWERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
+
+/**
  * Who may acknowledge alerts and run the alerts check on demand. Every role
  * can read alerts.
  */
