@@ -6,12 +6,13 @@ const pathsFor = (role: RoleCode) =>
   navForRole(role).flatMap((section) => section.items.map((item) => item.path));
 
 describe('role-based navigation', () => {
-  it('shows a cashier only billing, their own sales, returns, offline sales and alerts', () => {
+  it('shows a cashier only billing, their own sales, returns, offline sales, deliveries and alerts', () => {
     expect(pathsFor('CASHIER')).toEqual([
       '/billing',
       '/sales',
       '/returns',
       '/offline-sales',
+      '/deliveries',
       '/alerts',
     ]);
     expect(navForRole('CASHIER').map((s) => s.title)).toEqual(['Counter', 'Stock']);
@@ -35,6 +36,7 @@ describe('role-based navigation', () => {
       '/medicines',
       '/categories',
       '/inventory',
+      '/deliveries',
       '/suppliers',
       '/alerts',
       '/reports',
@@ -47,6 +49,7 @@ describe('role-based navigation', () => {
     const sales = findNavItem('/sales')!;
     expect(navLabel(sales, 'CASHIER')).toBe('My sales');
     expect(navLabel(sales, 'ADMIN')).toBe('Sales');
+    expect(navLabel(findNavItem('/deliveries/new')!, 'CASHIER')).toBe('My deliveries');
   });
 
   it('sends cashiers to billing and staff to the dashboard after login', () => {

@@ -23,6 +23,7 @@ export function AsyncCombobox<T>({
   renderItem,
   placeholder,
   emptyText = 'No matches',
+  emptyAction,
   inputRef,
   disabled,
   ...aria
@@ -37,6 +38,8 @@ export function AsyncCombobox<T>({
   renderItem?: (item: T) => ReactNode;
   placeholder?: string;
   emptyText?: string;
+  /** Offered when nothing matches, e.g. to add what was typed as a new record. */
+  emptyAction?: { label: (term: string) => string; onSelect: (term: string) => void };
   inputRef?: Ref<HTMLInputElement>;
   disabled?: boolean;
   'aria-invalid'?: boolean;
@@ -139,7 +142,22 @@ export function AsyncCombobox<T>({
           ) : results.isPending ? (
             <li className="px-3 py-6 text-center text-sm text-muted-foreground">Searching…</li>
           ) : items.length === 0 ? (
-            <li className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyText}</li>
+            <li className="space-y-2 px-3 py-6 text-center text-sm text-muted-foreground">
+              <p>{emptyText}</p>
+              {emptyAction && (
+                <button
+                  type="button"
+                  className="font-medium text-primary underline-offset-2 hover:underline"
+                  onClick={() => {
+                    setOpen(false);
+                    emptyAction.onSelect(term.trim());
+                    setTerm('');
+                  }}
+                >
+                  {emptyAction.label(term.trim())}
+                </button>
+              )}
+            </li>
           ) : (
             items.map((item, index) => {
               const selected = value !== null && getKey(value) === getKey(item);

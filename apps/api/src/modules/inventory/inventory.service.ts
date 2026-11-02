@@ -57,7 +57,7 @@ const MAX_SHELF_LIFE_YEARS = 10;
 
 // Receipts and bulk write-offs write a few rows per line, so allow more than
 // Prisma's 5s default.
-const BULK_TX = { timeout: 30_000 };
+export const BULK_TX = { timeout: 30_000 };
 
 const batchInclude = {
   medicine: { select: { id: true, name: true, genericName: true, unit: true } },
@@ -113,7 +113,96 @@ function toMovementDto(m: MovementRow): StockMovementDto {
 
 // ─── Writes ─────────────────────────────────────────────────────────────────
 
-type ItemIssue = { index: number; field: string; message: string };
+export type ItemIssue = { index: number; field: string; message: string };
+
+/** Delivery lines whose expiry date can't be received today (already expired, or a typo). */
+export function receiptDateIssues(items: { expiryDate: string }[], today: string): ItemIssue[] {
+  const latestExpiry = addYears(today, MAX_SHELF_LIFE_YEARS);
+  return items.flatMap((item, index): ItemIssue[] => {
+    if (isExpiredOn(item.expiryDate, today)) {
+      const message = `Expiry date ${item.expiryDate} is not after today (${today}); expired stock cannot be received`;
+      return [{ index, field: 'expiryDate', message }];
+    }
+    if (item.expiryDate > latestExpiry) {
+      const message = `Expiry date ${item.expiryDate} is more than ${MAX_SHELF_LIFE_YEARS} years away; check for a typo`;
+      return [{ index, field: 'expiryDate', message }];
+    }
+    return [];
+  });
+}
+
+/** A delivery line to check: `medicineId` is null for a medicine not in the catalogue yet. */
+type CheckedLine = { medicineId: string | null; batchNumber: string; expiryDate: string };
+
+/**
+ * Checks a delivery against the database: an active supplier, active
+ * medicines, and lot numbers that agree with earlier receipts. Lines without
+ * a medicine are skipped; issues keep each line's index.
+ */
+export async function checkReceipt(
+  tx: Prisma.TransactionClient,
+  supplierId: string,
+  items: CheckedLine[],
+): Promise<void> {
+  const supplier = await tx.supplier.findUnique({
+    where: { id: supplierId },
+    select: { status: true },
+  });
+  if (!supplier) throw badRequest('Supplier does not exist', { field: 'supplierId' });
+  if (supplier.status !== 'ACTIVE') {
+    throw badRequest('Supplier is inactive', { field: 'supplierId' });
+  }
+
+  const known = items.flatMap((item) =>
+    item.medicineId ? [{ ...item, medicineId: item.medicineId }] : [],
+  );
+  const medicines = await tx.medicine.findMany({
+    where: { id: { in: [...new Set(known.map((i) => i.medicineId))] } },
+    select: { id: true, name: true, status: true },
+  });
+  const medicineById = new Map(medicines.map((m) => [m.id, m]));
+  const medicineIssues = items.flatMap((item, index): ItemIssue[] => {
+    if (!item.medicineId) return [];
+    const medicine = medicineById.get(item.medicineId);
+    if (!medicine) return [{ index, field: 'medicineId', message: 'Medicine does not exist' }];
+    if (medicine.status !== 'ACTIVE') {
+      return [{ index, field: 'medicineId', message: `"${medicine.name}" is inactive` }];
+    }
+    return [];
+  });
+  if (medicineIssues.length > 0) {
+    throw badRequest('Some items cannot be received', { items: medicineIssues });
+  }
+
+  // A lot can arrive more than once (a top-up from the same production run),
+  // and each delivery gets its own Batch row. But one manufacturer lot has
+  // one expiry date, so a different date means a data-entry mistake.
+  const earlier =
+    known.length === 0
+      ? []
+      : await tx.batch.findMany({
+          where: {
+            OR: known.map((i) => ({ medicineId: i.medicineId, batchNumber: i.batchNumber })),
+          },
+          select: { medicineId: true, batchNumber: true, expiryDate: true },
+        });
+  const lotIssues = items.flatMap((item, index): ItemIssue[] => {
+    const clash = earlier.find(
+      (b) =>
+        b.medicineId === item.medicineId &&
+        b.batchNumber === item.batchNumber &&
+        toDateOnly(b.expiryDate) !== item.expiryDate,
+    );
+    if (!clash) return [];
+    const message = `Batch ${item.batchNumber} of this medicine was received before with expiry ${toDateOnly(clash.expiryDate)}`;
+    return [{ index, field: 'expiryDate', message }];
+  });
+  if (lotIssues.length > 0) {
+    throw conflict('Expiry dates clash with earlier receipts of the same batch', {
+      items: lotIssues,
+    });
+  }
+}
 
 /**
  * Receives one supplier delivery. Every line becomes a new Batch plus a
@@ -125,111 +214,61 @@ export async function receiveStock(
   actor: Actor,
 ): Promise<BatchStockDto[]> {
   const today = businessToday();
-  const latestExpiry = addYears(today, MAX_SHELF_LIFE_YEARS);
-  const dateIssues = input.items.flatMap((item, index): ItemIssue[] => {
-    if (isExpiredOn(item.expiryDate, today)) {
-      const message = `Expiry date ${item.expiryDate} is not after today (${today}); expired stock cannot be received`;
-      return [{ index, field: 'expiryDate', message }];
-    }
-    if (item.expiryDate > latestExpiry) {
-      const message = `Expiry date ${item.expiryDate} is more than ${MAX_SHELF_LIFE_YEARS} years away; check for a typo`;
-      return [{ index, field: 'expiryDate', message }];
-    }
-    return [];
-  });
+  const dateIssues = receiptDateIssues(input.items, today);
   if (dateIssues.length > 0) {
     throw badRequest('Some items cannot be received', { items: dateIssues });
   }
+  return prisma.$transaction((tx) => receiveInTx(tx, input, actor, today), BULK_TX);
+}
 
-  return prisma.$transaction(async (tx) => {
-    const supplier = await tx.supplier.findUnique({
-      where: { id: input.supplierId },
-      select: { status: true },
-    });
-    if (!supplier) throw badRequest('Supplier does not exist', { field: 'supplierId' });
-    if (supplier.status !== 'ACTIVE') {
-      throw badRequest('Supplier is inactive', { field: 'supplierId' });
-    }
+/**
+ * The writes behind receiveStock, for a caller that already holds a
+ * transaction (approving a delivery). Expiry dates must already be checked.
+ * Returns one batch per line, in line order.
+ */
+export async function receiveInTx(
+  tx: Prisma.TransactionClient,
+  input: ReceiveStockBody,
+  actor: Actor,
+  today: string,
+): Promise<BatchStockDto[]> {
+  await checkReceipt(tx, input.supplierId, input.items);
 
-    const medicines = await tx.medicine.findMany({
-      where: { id: { in: [...new Set(input.items.map((i) => i.medicineId))] } },
-      select: { id: true, name: true, status: true },
-    });
-    const medicineById = new Map(medicines.map((m) => [m.id, m]));
-    const medicineIssues = input.items.flatMap((item, index): ItemIssue[] => {
-      const medicine = medicineById.get(item.medicineId);
-      if (!medicine) return [{ index, field: 'medicineId', message: 'Medicine does not exist' }];
-      if (medicine.status !== 'ACTIVE') {
-        return [{ index, field: 'medicineId', message: `"${medicine.name}" is inactive` }];
-      }
-      return [];
-    });
-    if (medicineIssues.length > 0) {
-      throw badRequest('Some items cannot be received', { items: medicineIssues });
-    }
-
-    // A lot can arrive more than once (a top-up from the same production run),
-    // and each delivery gets its own Batch row. But one manufacturer lot has
-    // one expiry date, so a different date means a data-entry mistake.
-    const earlier = await tx.batch.findMany({
-      where: {
-        OR: input.items.map((i) => ({ medicineId: i.medicineId, batchNumber: i.batchNumber })),
+  const reason = input.invoiceNumber ? `Invoice ${input.invoiceNumber}` : null;
+  const received: BatchStockDto[] = [];
+  for (const item of input.items) {
+    const batch = await tx.batch.create({
+      data: {
+        medicineId: item.medicineId,
+        supplierId: input.supplierId,
+        batchNumber: item.batchNumber,
+        expiryDate: fromDateOnly(item.expiryDate),
+        costPrice: new Prisma.Decimal(item.costPrice),
+        quantityReceived: item.quantity,
       },
-      select: { medicineId: true, batchNumber: true, expiryDate: true },
+      include: batchInclude,
     });
-    const lotIssues = input.items.flatMap((item, index): ItemIssue[] => {
-      const clash = earlier.find(
-        (b) =>
-          b.medicineId === item.medicineId &&
-          b.batchNumber === item.batchNumber &&
-          toDateOnly(b.expiryDate) !== item.expiryDate,
-      );
-      if (!clash) return [];
-      const message = `Batch ${item.batchNumber} of this medicine was received before with expiry ${toDateOnly(clash.expiryDate)}`;
-      return [{ index, field: 'expiryDate', message }];
-    });
-    if (lotIssues.length > 0) {
-      throw conflict('Expiry dates clash with earlier receipts of the same batch', {
-        items: lotIssues,
-      });
-    }
-
-    const reason = input.invoiceNumber ? `Invoice ${input.invoiceNumber}` : null;
-    const received: BatchStockDto[] = [];
-    for (const item of input.items) {
-      const batch = await tx.batch.create({
-        data: {
-          medicineId: item.medicineId,
-          supplierId: input.supplierId,
-          batchNumber: item.batchNumber,
-          expiryDate: fromDateOnly(item.expiryDate),
-          costPrice: new Prisma.Decimal(item.costPrice),
-          quantityReceived: item.quantity,
-        },
-        include: batchInclude,
-      });
-      const movement = await tx.stockMovement.create({
-        data: {
-          batchId: batch.id,
-          type: 'PURCHASE',
-          quantity: item.quantity,
-          reason,
-          userId: actor.id,
-        },
-      });
-      const dto = toBatchStockDto(batch, item.quantity, today, FULL_VIEW);
-      await writeAudit(tx, {
+    const movement = await tx.stockMovement.create({
+      data: {
+        batchId: batch.id,
+        type: 'PURCHASE',
+        quantity: item.quantity,
+        reason,
         userId: actor.id,
-        action: 'STOCK_RECEIVE',
-        entityType: 'Batch',
-        entityId: batch.id,
-        after: { ...dto, invoiceNumber: input.invoiceNumber ?? null, movementId: movement.id },
-        meta: actor.meta,
-      });
-      received.push(dto);
-    }
-    return received;
-  }, BULK_TX);
+      },
+    });
+    const dto = toBatchStockDto(batch, item.quantity, today, FULL_VIEW);
+    await writeAudit(tx, {
+      userId: actor.id,
+      action: 'STOCK_RECEIVE',
+      entityType: 'Batch',
+      entityId: batch.id,
+      after: { ...dto, invoiceNumber: input.invoiceNumber ?? null, movementId: movement.id },
+      meta: actor.meta,
+    });
+    received.push(dto);
+  }
+  return received;
 }
 
 /**

@@ -1,12 +1,14 @@
-import { createBrowserRouter } from 'react-router';
+import { Navigate, createBrowserRouter, useLocation } from 'react-router';
 import { AppLayout } from '@/components/layout/app-layout';
 import { AlertsPage } from '@/features/alerts/alerts-page';
 import { LoginPage } from '@/features/auth/login-page';
 import { HomeRedirect, RequireAuth, RequireRole } from '@/features/auth/route-guards';
 import { BillingPage } from '@/features/billing/billing-page';
 import { CategoriesPage } from '@/features/categories/categories-page';
+import { DeliveriesPage } from '@/features/deliveries/deliveries-page';
+import { DeliveryDetailPage } from '@/features/deliveries/delivery-detail-page';
+import { EditDeliveryPage, NewDeliveryPage } from '@/features/deliveries/delivery-form';
 import { InventoryPage } from '@/features/inventory/inventory-page';
-import { ReceiveStockPage } from '@/features/inventory/receive-stock-page';
 import { LegacyPage } from '@/features/legacy/legacy-page';
 import { MedicineDetailPage } from '@/features/medicines/medicine-detail-page';
 import { MedicinesPage } from '@/features/medicines/medicines-page';
@@ -20,6 +22,12 @@ import { SuppliersPage } from '@/features/suppliers/suppliers-page';
 import { UsersPage } from '@/features/users/users-page';
 import { ADMIN_ONLY, ALL_ROLES, STAFF_ROLES } from '@/lib/navigation';
 import { NotFoundPage } from '@/pages/not-found-page';
+
+/** Receiving stock moved to Deliveries; old links and bookmarks keep working. */
+function ReceiveStockRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/deliveries/new${search}`} replace />;
+}
 
 // Route roles must match the `roles` of the matching item in lib/navigation.ts.
 export const router = createBrowserRouter([
@@ -41,6 +49,10 @@ export const router = createBrowserRouter([
               { path: 'returns/new', element: <NewReturnPage /> },
               { path: 'returns/:id', element: <ReturnDetailPage /> },
               { path: 'offline-sales', element: <OfflineSalesPage /> },
+              { path: 'deliveries', element: <DeliveriesPage /> },
+              { path: 'deliveries/new', element: <NewDeliveryPage /> },
+              { path: 'deliveries/:id', element: <DeliveryDetailPage /> },
+              { path: 'deliveries/:id/edit', element: <EditDeliveryPage /> },
               { path: 'alerts', element: <AlertsPage /> },
             ],
           },
@@ -58,7 +70,7 @@ export const router = createBrowserRouter([
               { path: 'medicines/:id', element: <MedicineDetailPage /> },
               { path: 'categories', element: <CategoriesPage /> },
               { path: 'inventory', element: <InventoryPage /> },
-              { path: 'inventory/receive', element: <ReceiveStockPage /> },
+              { path: 'inventory/receive', element: <ReceiveStockRedirect /> },
               { path: 'suppliers', element: <SuppliersPage /> },
               { path: 'old-records', element: <LegacyPage /> },
               {

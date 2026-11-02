@@ -6,6 +6,7 @@ import {
   BoxesIcon,
   CloudOffIcon,
   LayoutDashboardIcon,
+  PackagePlusIcon,
   PillIcon,
   ReceiptTextIcon,
   ScanBarcodeIcon,
@@ -62,6 +63,14 @@ export const NAV_SECTIONS: NavSection[] = [
       { path: '/medicines', label: 'Medicines', icon: PillIcon, roles: STAFF_ROLES },
       { path: '/categories', label: 'Categories', icon: TagsIcon, roles: STAFF_ROLES },
       { path: '/inventory', label: 'Inventory', icon: BoxesIcon, roles: STAFF_ROLES },
+      // Cashiers enter deliveries too; theirs wait for staff to approve them.
+      {
+        path: '/deliveries',
+        label: 'Deliveries',
+        cashierLabel: 'My deliveries',
+        icon: PackagePlusIcon,
+        roles: ALL_ROLES,
+      },
       { path: '/suppliers', label: 'Suppliers', icon: TruckIcon, roles: STAFF_ROLES },
       // Everyone sees low-stock and expiry alerts; only staff mark them seen.
       { path: '/alerts', label: 'Alerts', icon: BellIcon, roles: ALL_ROLES },

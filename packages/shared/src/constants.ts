@@ -24,6 +24,9 @@ export type SaleStatus = (typeof SALE_STATUSES)[number];
 export const RETURN_STATUSES = ['PENDING', 'COMPLETED', 'REJECTED', 'VOIDED'] as const;
 export type ReturnStatus = (typeof RETURN_STATUSES)[number];
 
+export const DELIVERY_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type DeliveryStatus = (typeof DELIVERY_STATUSES)[number];
+
 export const PAYMENT_METHODS = ['CASH', 'CARD', 'MOBILE_WALLET'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 

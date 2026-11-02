@@ -1,9 +1,12 @@
-import { receiveStockBodySchema, type MedicineDto } from '@pharmacy/shared';
+import { deliveryBodySchema, type DeliveryDto, type MedicineDto } from '@pharmacy/shared';
 import { describe, expect, it } from 'vitest';
 import { parseForm } from '@/lib/form';
 import {
   emptyLine,
+  emptyNewMedicine,
   lineDateErrors,
+  linesFromDelivery,
+  lineUnit,
   lineWarnings,
   receiptTotals,
   toReceiptInput,
@@ -41,10 +44,75 @@ describe('receipt lines', () => {
     const input = toReceiptInput('e2a1c3b4-5d6e-4f70-8a9b-0c1d2e3f4a5b', 'INV-9', [
       line({ batchNumber: ' pn-1 ' }),
     ]);
-    const parsed = parseForm(receiveStockBodySchema, input);
+    const parsed = parseForm(deliveryBodySchema, input);
     expect(parsed).toMatchObject({
       ok: true,
       data: { invoiceNumber: 'INV-9', items: [{ batchNumber: 'PN-1', quantity: 100 }] },
+    });
+  });
+
+  it('sends a proposed medicine instead of a medicine id', () => {
+    const newMedicine = {
+      ...emptyNewMedicine('Calpol Syrup'),
+      categoryId: medicine.category.id,
+      unit: 'Bottle',
+      sellingPrice: '185',
+    };
+    const input = toReceiptInput('e2a1c3b4-5d6e-4f70-8a9b-0c1d2e3f4a5b', '', [
+      line({ medicine: null, newMedicine }),
+    ]);
+    const parsed = parseForm(deliveryBodySchema, input);
+    expect(parsed).toMatchObject({
+      ok: true,
+      data: {
+        items: [
+          {
+            newMedicine: { name: 'Calpol Syrup', unit: 'bottle', reorderLevel: 0, barcode: null },
+          },
+        ],
+      },
+    });
+    expect(parsed.ok && 'medicineId' in parsed.data.items[0]!).toBe(false);
+    expect(lineUnit(line({ medicine: null, newMedicine }))).toBe('Bottle');
+    expect(lineWarnings(line({ medicine: null, newMedicine, costPrice: '190' }), today)).toEqual([
+      'Cost is above the selling price (Rs 185.00); check the price or the medicine',
+    ]);
+  });
+
+  it('turns a saved delivery back into lines', () => {
+    const base = {
+      lineNo: 1,
+      batchNumber: 'PN-1',
+      expiryDate: '2028-01-31',
+      costPrice: '1.80',
+      quantity: 100,
+      lineCost: '180.00',
+      batchId: null,
+    };
+    const delivery = {
+      items: [
+        { ...base, id: 'a', medicine, newMedicine: null },
+        {
+          ...base,
+          id: 'b',
+          medicine: null,
+          newMedicine: {
+            name: 'Calpol',
+            genericName: null,
+            barcode: '89',
+            category: medicine.category,
+            unit: 'bottle',
+            reorderLevel: 5,
+            sellingPrice: '185.00',
+          },
+        },
+      ],
+    } as unknown as DeliveryDto;
+    const [a, b] = linesFromDelivery(delivery);
+    expect(a).toMatchObject({ medicine, newMedicine: null, quantity: '100', costPrice: '1.80' });
+    expect(b).toMatchObject({
+      medicine: null,
+      newMedicine: { name: 'Calpol', genericName: '', barcode: '89', reorderLevel: '5' },
     });
   });
 

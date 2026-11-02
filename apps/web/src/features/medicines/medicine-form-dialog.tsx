@@ -26,7 +26,7 @@ import { useActiveCategories } from '@/features/catalog/use-categories';
 import { errorMessage } from '@/lib/api';
 import { intInput, parseForm, serverFieldErrors, type FieldErrors } from '@/lib/form';
 
-const COMMON_UNITS = [
+export const COMMON_UNITS = [
   'tablet',
   'capsule',
   'strip',

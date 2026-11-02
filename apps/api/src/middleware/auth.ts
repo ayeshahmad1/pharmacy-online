@@ -49,6 +49,12 @@ export const SALE_MANAGERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly
  */
 export const RETURN_APPROVERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
 
+/**
+ * Whose deliveries go into stock straight away, and who corrects, approves or
+ * rejects the deliveries a CASHIER enters (those wait as PENDING).
+ */
+export const DELIVERY_APPROVERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
+
 /** Who may see reports and the dashboard (sales, profit, cost prices, cash closing). */
 export const REPORT_VIEWERS = ['ADMIN', 'PHARMACIST'] as const satisfies readonly RoleCode[];
 

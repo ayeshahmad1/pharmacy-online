@@ -59,6 +59,12 @@ enum ReturnStatus {
   VOIDED
 }
 
+enum DeliveryStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum PaymentMethod {
   CASH
   CARD
@@ -112,18 +118,21 @@ model User {
   createdAt    DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
 
-  sales              Sale[]                @relation("SaleCashier")
-  voidedSales        Sale[]                @relation("SaleVoidedBy")
-  requestedReturns   Return[]              @relation("ReturnRequestedBy")
-  reviewedReturns    Return[]              @relation("ReturnReviewedBy")
-  voidedReturns      Return[]              @relation("ReturnVoidedBy")
-  stockMovements     StockMovement[]
-  auditLogs          AuditLog[]
-  refreshTokens      RefreshToken[]
-  offlineConflicts   OfflineSaleConflict[] @relation("OfflineConflictCashier")
-  resolvedOffline    OfflineSaleConflict[] @relation("OfflineConflictResolvedBy")
-  acknowledgedAlerts Alert[]
-  legacyReturns      LegacyReturn[]
+  sales               Sale[]                @relation("SaleCashier")
+  voidedSales         Sale[]                @relation("SaleVoidedBy")
+  requestedReturns    Return[]              @relation("ReturnRequestedBy")
+  reviewedReturns     Return[]              @relation("ReturnReviewedBy")
+  voidedReturns       Return[]              @relation("ReturnVoidedBy")
+  stockMovements      StockMovement[]
+  auditLogs           AuditLog[]
+  refreshTokens       RefreshToken[]
+  offlineConflicts    OfflineSaleConflict[] @relation("OfflineConflictCashier")
+  resolvedOffline     OfflineSaleConflict[] @relation("OfflineConflictResolvedBy")
+  acknowledgedAlerts  Alert[]
+  legacyReturns       LegacyReturn[]
+  requestedDeliveries Delivery[]            @relation("DeliveryRequestedBy")
+  reviewedDeliveries  Delivery[]            @relation("DeliveryReviewedBy")
+  correctedDeliveries Delivery[]            @relation("DeliveryCorrectedBy")
 
   @@index([roleId])
 }
@@ -154,13 +163,15 @@ model RefreshToken {
 // ─── Catalogue ──────────────────────────────────────────────────────────────
 
 model Category {
-  id          String       @id @default(uuid()) @db.Uuid
-  name        String       @unique
-  description String?
-  status      RecordStatus @default(ACTIVE)
-  medicines   Medicine[]
-  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+  id            String         @id @default(uuid()) @db.Uuid
+  name          String         @unique
+  description   String?
+  status        RecordStatus   @default(ACTIVE)
+  medicines     Medicine[]
+  /// Proposed new medicines on pending deliveries.
+  deliveryItems DeliveryItem[]
+  createdAt     DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(3)
 }
 
 model Supplier {
@@ -173,30 +184,32 @@ model Supplier {
   status          RecordStatus     @default(ACTIVE)
   batches         Batch[]
   legacyPurchases LegacyPurchase[]
+  deliveries      Delivery[]
   createdAt       DateTime         @default(now()) @db.Timestamptz(3)
   updatedAt       DateTime         @updatedAt @db.Timestamptz(3)
 }
 
 model Medicine {
-  id           String       @id @default(uuid()) @db.Uuid
-  name         String
+  id            String         @id @default(uuid()) @db.Uuid
+  name          String
   /// Generic / salt name, e.g. "Paracetamol". Optional for non-drug items.
-  genericName  String?
+  genericName   String?
   /// Optional: some items have no barcode. Unique when present.
-  barcode      String?      @unique
-  categoryId   String       @db.Uuid
-  category     Category     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  barcode       String?        @unique
+  categoryId    String         @db.Uuid
+  category      Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
   /// Unit that stock quantities are counted in, e.g. "tablet", "strip", "bottle".
-  unit         String
+  unit          String
   /// Low-stock alert threshold, in `unit`.
-  reorderLevel Int          @default(0)
+  reorderLevel  Int            @default(0)
   /// Current selling price per `unit`. SaleItem snapshots the price at sale time.
-  sellingPrice Decimal      @db.Decimal(12, 2)
-  status       RecordStatus @default(ACTIVE)
-  batches      Batch[]
-  alerts       Alert[]
-  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
-  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+  sellingPrice  Decimal        @db.Decimal(12, 2)
+  status        RecordStatus   @default(ACTIVE)
+  batches       Batch[]
+  alerts        Alert[]
+  deliveryItems DeliveryItem[]
+  createdAt     DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(3)
 
   @@index([name])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "Medicine_name_trgm_idx")
@@ -227,6 +240,8 @@ model Batch {
   alerts            Alert[]
   legacyPurchases   LegacyPurchase[]
   legacyReturnItems LegacyReturnItem[]
+  /// The delivery line this batch was received from, if it came through one.
+  deliveryItem      DeliveryItem?
   createdAt         DateTime           @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime           @updatedAt @db.Timestamptz(3)
 
@@ -261,6 +276,71 @@ model StockMovement {
   @@index([userId])
   @@index([saleItemId])
   @@index([returnItemId])
+}
+
+// ─── Deliveries ─────────────────────────────────────────────────────────────
+
+/// One supplier delivery entered through the Deliveries screen. A CASHIER's
+/// waits as PENDING, holding no stock, until an ADMIN/PHARMACIST corrects it
+/// if needed and approves it (its batches, PURCHASE movements and any new
+/// medicines are created then) or rejects it. A pharmacist's or admin's own
+/// delivery is APPROVED at once.
+model Delivery {
+  id              String         @id @default(uuid()) @db.Uuid
+  status          DeliveryStatus @default(PENDING)
+  supplierId      String         @db.Uuid
+  supplier        Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  invoiceNumber   String?
+  requestedById   String         @db.Uuid
+  requestedBy     User           @relation("DeliveryRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  /// Who approved or rejected it, and when. For staff's own deliveries, that
+  /// same person at the same time.
+  reviewedById    String?        @db.Uuid
+  reviewedBy      User?          @relation("DeliveryReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+  reviewedAt      DateTime?      @db.Timestamptz(3)
+  rejectionReason String?
+  /// The last approver who changed it while pending. What the cashier first
+  /// entered stays in the audit log.
+  correctedById   String?        @db.Uuid
+  correctedBy     User?          @relation("DeliveryCorrectedBy", fields: [correctedById], references: [id], onDelete: Restrict)
+  correctedAt     DateTime?      @db.Timestamptz(3)
+  items           DeliveryItem[]
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+
+  @@index([status, createdAt]) // approval queue
+  @@index([requestedById, createdAt]) // a cashier's own deliveries
+  @@index([supplierId])
+}
+
+/// One batch on a delivery. It names a catalogue medicine, or proposes a new
+/// one (the `new*` columns); on approval the medicine is created, `medicineId`
+/// set, and the proposal kept as a record. `batchId` is set on approval.
+model DeliveryItem {
+  id              String    @id @default(uuid()) @db.Uuid
+  deliveryId      String    @db.Uuid
+  delivery        Delivery  @relation(fields: [deliveryId], references: [id], onDelete: Restrict)
+  lineNo          Int
+  medicineId      String?   @db.Uuid
+  medicine        Medicine? @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  newName         String?
+  newGenericName  String?
+  newBarcode      String?
+  newCategoryId   String?   @db.Uuid
+  newCategory     Category? @relation(fields: [newCategoryId], references: [id], onDelete: Restrict)
+  newUnit         String?
+  newReorderLevel Int?
+  newSellingPrice Decimal?  @db.Decimal(12, 2)
+  batchNumber     String
+  expiryDate      DateTime  @db.Date
+  costPrice       Decimal   @db.Decimal(12, 2)
+  quantity        Int
+  batchId         String?   @unique @db.Uuid
+  batch           Batch?    @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@unique([deliveryId, lineNo])
+  @@index([medicineId])
+  @@index([newCategoryId])
 }
 
 // ─── Sales ──────────────────────────────────────────────────────────────────

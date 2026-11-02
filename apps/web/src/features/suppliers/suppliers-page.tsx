@@ -136,7 +136,7 @@ export function SuppliersPage() {
                         <RowActions label={`Actions for ${supplier.name}`}>
                           {supplier.status === 'ACTIVE' && (
                             <DropdownMenuItem asChild>
-                              <Link to={`/inventory/receive?supplierId=${supplier.id}`}>
+                              <Link to={`/deliveries/new?supplierId=${supplier.id}`}>
                                 <PackagePlusIcon /> Receive stock
                               </Link>
                             </DropdownMenuItem>

@@ -17,6 +17,7 @@ import { alertsRouter } from './modules/alerts/alerts.routes';
 import { authRouter } from './modules/auth/auth.routes';
 import { categoriesRouter } from './modules/categories/categories.routes';
 import { healthRouter } from './modules/health/health.routes';
+import { deliveriesRouter } from './modules/deliveries/deliveries.routes';
 import { inventoryRouter } from './modules/inventory/inventory.routes';
 import { legacyRouter } from './modules/legacy/legacy.routes';
 import { medicinesRouter } from './modules/medicines/medicines.routes';
@@ -85,6 +86,7 @@ export function createApp(overrides: Partial<AppOptions> = {}) {
   app.use('/api/suppliers', suppliersRouter);
   app.use('/api/medicines', medicinesRouter);
   app.use('/api/inventory', inventoryRouter);
+  app.use('/api/deliveries', deliveriesRouter);
   app.use('/api/sales', salesRouter);
   app.use('/api/returns', returnsRouter);
   app.use('/api/offline-sales', offlineSalesRouter);

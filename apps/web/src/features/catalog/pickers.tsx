@@ -13,11 +13,23 @@ type PickerProps<T> = {
   'aria-describedby'?: string;
 };
 
-/** Search active medicines by brand or generic name. */
-export function MedicinePicker(props: PickerProps<MedicineDto>) {
+/**
+ * Search active medicines by brand or generic name. With `onAddNew`, a search
+ * that finds nothing offers to add what was typed as a new medicine.
+ */
+export function MedicinePicker({
+  onAddNew,
+  ...props
+}: PickerProps<MedicineDto> & { onAddNew?: (name: string) => void }) {
   return (
     <AsyncCombobox
       {...props}
+      emptyAction={
+        onAddNew && {
+          label: (term) => (term ? `Add "${term}" as a new medicine` : 'Add a new medicine'),
+          onSelect: onAddNew,
+        }
+      }
       queryKey={(q) => [...catalogKeys.medicines, 'picker', q]}
       search={async (q, signal) =>
         (await medicinesApi.list({ q: q || undefined, status: 'ACTIVE', pageSize: 10 }, signal))

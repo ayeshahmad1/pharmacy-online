@@ -9,7 +9,6 @@ import type {
   LowStockQuery,
   MedicineStockDto,
   Paginated,
-  ReceiveStockBody,
   StockAdjustmentDto,
   StockMovementDto,
   StockSummaryDto,
@@ -50,8 +49,6 @@ export const inventoryApi = {
     ).stock,
   movements: (query: Query<ListMovementsQuery>, signal?: AbortSignal) =>
     api.get<Paginated<StockMovementDto>>('/inventory/movements', query, signal),
-  receive: async (body: ReceiveStockBody) =>
-    (await api.post<{ batches: BatchStockDto[] }>('/inventory/receipts', body)).batches,
   adjust: async (body: AdjustStockBody) =>
     (await api.post<{ adjustment: StockAdjustmentDto }>('/inventory/adjustments', body)).adjustment,
   writeOffExpired: async (body: WriteOffExpiredBody) =>

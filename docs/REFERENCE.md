@@ -7,32 +7,38 @@ runbook are in the [README](../README.md); business rules are in [CLAUDE.md](../
 
 `pnpm --filter api dev` starts the API on http://localhost:4000.
 
-| Endpoint                                                    | Who               | Notes                                                                                                                          |
-| ----------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `POST /api/auth/login`                                      | anyone            | `{ username, password }` → access token + user                                                                                 |
-| `POST /api/auth/refresh`                                    | cookie            | Rotates the refresh cookie, returns a new access token                                                                         |
-| `POST /api/auth/logout`                                     | cookie            | Revokes the refresh token, clears the cookie                                                                                   |
-| `GET /api/auth/me`                                          | any user          | Current user                                                                                                                   |
-| `GET /api/health`                                           | anyone            | Liveness: `{ status, release, uptimeSeconds }`, never touches the database                                                     |
-| `GET /api/health/ready`                                     | anyone            | Readiness: 200 if Postgres answers within 2 s, else 503                                                                        |
-| `GET /api/ping`                                             | anyone            | 204; the web app's connectivity probe                                                                                          |
-| `GET/POST /api/users`                                       | ADMIN             | List (`q`, `role`, `status`, `page`, `pageSize`) / create                                                                      |
-| `GET/PATCH /api/users/:id`                                  | ADMIN             | Get / update name, email, role                                                                                                 |
-| `POST /api/users/:id/deactivate`                            | ADMIN             | Also revokes the user's sessions                                                                                               |
-| `POST /api/users/:id/activate`                              | ADMIN             |                                                                                                                                |
-| `POST /api/users/:id/reset-password`                        | ADMIN             | `{ newPassword }`; revokes the user's sessions                                                                                 |
-| `GET /api/medicines`                                        | any user          | Search `q` (name or generic/salt name, ranked), `categoryId`, `status`, `page`, `pageSize`                                     |
-| `GET /api/medicines/:id`                                    | any user          |                                                                                                                                |
-| `POST /api/medicines`                                       | ADMIN, PHARMACIST | `sellingPrice` is a decimal string, e.g. `"120.50"`                                                                            |
-| `PATCH /api/medicines/:id`                                  | ADMIN, PHARMACIST | Partial update; send `null`/`""` to clear an optional field                                                                    |
-| `GET /api/categories`, `GET /api/suppliers`                 | any user          | `q`, `status`, `page`, `pageSize`                                                                                              |
-| `GET /api/categories/:id`, `GET /api/suppliers/:id`         | any user          |                                                                                                                                |
-| `POST /api/categories`, `POST /api/suppliers`               | ADMIN, PHARMACIST | Names are unique, ignoring case                                                                                                |
-| `PATCH /api/categories/:id`, `PATCH /api/suppliers/:id`     | ADMIN, PHARMACIST |                                                                                                                                |
-| `POST /api/{medicines,categories,suppliers}/:id/deactivate` | ADMIN, PHARMACIST | Soft: the row is kept; there is no DELETE                                                                                      |
-| `POST /api/{medicines,categories,suppliers}/:id/activate`   | ADMIN, PHARMACIST |                                                                                                                                |
-| `GET /api/legacy/purchases`                                 | ADMIN, PHARMACIST | Old-system deliveries, newest first: `q` (medicine/generic name), `medicineId`, `supplierId`, `from`, `to`, `page`, `pageSize` |
-| `GET /api/legacy/returns`                                   | ADMIN, PHARMACIST | Old-system returns with their lines: `q`, `medicineId`, `cashierId`, `from`, `to`, `page`, `pageSize`                          |
+| Endpoint                                                    | Who               | Notes                                                                                                                                                                                                                              |
+| ----------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/auth/login`                                      | anyone            | `{ username, password }` → access token + user                                                                                                                                                                                     |
+| `POST /api/auth/refresh`                                    | cookie            | Rotates the refresh cookie, returns a new access token                                                                                                                                                                             |
+| `POST /api/auth/logout`                                     | cookie            | Revokes the refresh token, clears the cookie                                                                                                                                                                                       |
+| `GET /api/auth/me`                                          | any user          | Current user                                                                                                                                                                                                                       |
+| `GET /api/health`                                           | anyone            | Liveness: `{ status, release, uptimeSeconds }`, never touches the database                                                                                                                                                         |
+| `GET /api/health/ready`                                     | anyone            | Readiness: 200 if Postgres answers within 2 s, else 503                                                                                                                                                                            |
+| `GET /api/ping`                                             | anyone            | 204; the web app's connectivity probe                                                                                                                                                                                              |
+| `GET/POST /api/users`                                       | ADMIN             | List (`q`, `role`, `status`, `page`, `pageSize`) / create                                                                                                                                                                          |
+| `GET/PATCH /api/users/:id`                                  | ADMIN             | Get / update name, email, role                                                                                                                                                                                                     |
+| `POST /api/users/:id/deactivate`                            | ADMIN             | Also revokes the user's sessions                                                                                                                                                                                                   |
+| `POST /api/users/:id/activate`                              | ADMIN             |                                                                                                                                                                                                                                    |
+| `POST /api/users/:id/reset-password`                        | ADMIN             | `{ newPassword }`; revokes the user's sessions                                                                                                                                                                                     |
+| `GET /api/medicines`                                        | any user          | Search `q` (name or generic/salt name, ranked), `categoryId`, `status`, `page`, `pageSize`                                                                                                                                         |
+| `GET /api/medicines/:id`                                    | any user          |                                                                                                                                                                                                                                    |
+| `POST /api/medicines`                                       | ADMIN, PHARMACIST | `sellingPrice` is a decimal string, e.g. `"120.50"`                                                                                                                                                                                |
+| `PATCH /api/medicines/:id`                                  | ADMIN, PHARMACIST | Partial update; send `null`/`""` to clear an optional field                                                                                                                                                                        |
+| `GET /api/categories`, `GET /api/suppliers`                 | any user          | `q`, `status`, `page`, `pageSize`                                                                                                                                                                                                  |
+| `GET /api/categories/:id`, `GET /api/suppliers/:id`         | any user          |                                                                                                                                                                                                                                    |
+| `POST /api/categories`, `POST /api/suppliers`               | ADMIN, PHARMACIST | Names are unique, ignoring case                                                                                                                                                                                                    |
+| `PATCH /api/categories/:id`, `PATCH /api/suppliers/:id`     | ADMIN, PHARMACIST |                                                                                                                                                                                                                                    |
+| `POST /api/{medicines,categories,suppliers}/:id/deactivate` | ADMIN, PHARMACIST | Soft: the row is kept; there is no DELETE                                                                                                                                                                                          |
+| `POST /api/{medicines,categories,suppliers}/:id/activate`   | ADMIN, PHARMACIST |                                                                                                                                                                                                                                    |
+| `POST /api/deliveries`                                      | any user          | One supplier delivery: `supplierId`, `invoiceNumber`, `items` (per batch: `medicineId` or `newMedicine`, `batchNumber`, `expiryDate`, `costPrice`, `quantity`). A cashier's is `PENDING`; staff's is `APPROVED` (in stock) at once |
+| `GET /api/deliveries`                                       | any user          | Newest first: `q` (supplier or invoice), `status`, `supplierId`, `requestedById`, `page`, `pageSize`. Cashiers get only their own                                                                                                  |
+| `GET /api/deliveries/:id`                                   | any user          | With its lines; 404 for a cashier on someone else's                                                                                                                                                                                |
+| `PUT /api/deliveries/:id`                                   | any user          | Replaces a `PENDING` delivery (same body as POST): its cashier fixing it, or staff correcting it (`correctedBy`)                                                                                                                   |
+| `POST /api/deliveries/:id/approve`                          | ADMIN, PHARMACIST | Creates any new medicines, the batches and their PURCHASE movements in one transaction                                                                                                                                             |
+| `POST /api/deliveries/:id/reject`                           | ADMIN, PHARMACIST | `{ reason }`; nothing enters stock                                                                                                                                                                                                 |
+| `GET /api/legacy/purchases`                                 | ADMIN, PHARMACIST | Old-system deliveries, newest first: `q` (medicine/generic name), `medicineId`, `supplierId`, `from`, `to`, `page`, `pageSize`                                                                                                     |
+| `GET /api/legacy/returns`                                   | ADMIN, PHARMACIST | Old-system returns with their lines: `q`, `medicineId`, `cashierId`, `from`, `to`, `page`, `pageSize`                                                                                                                              |
 
 Send the access token as `Authorization: Bearer <token>`. The refresh token is an httpOnly cookie
 (`pharmacy_rt`, or `__Secure-pharmacy_rt` over HTTPS; path `/api/auth`), so the browser sends it
@@ -49,7 +55,7 @@ behind Nginx in production. Start the API first.
   cookie. A 401 triggers one shared refresh and a retry. Refreshes are serialised across tabs with a
   Web Lock, because the server treats a reused refresh token as theft. Logging out in one tab logs out
   the others.
-- **Roles:** cashiers land on Billing and see only Billing, My sales, Returns, My offline sales and Alerts. Pharmacists see
+- **Roles:** cashiers land on Billing and see only Billing, My sales, Returns, My offline sales, My deliveries and Alerts. Pharmacists see
   everything except Users. The menu lives in `apps/web/src/lib/navigation.ts`, and route guards in
   `src/router.tsx` use the same role lists. The API enforces the real rules.
 - **PWA:** `pnpm --filter web build` emits a manifest and a Workbox service worker that precaches
@@ -60,7 +66,7 @@ behind Nginx in production. Start the API first.
 <name>` from `apps/web`). Theme (light/dark/system) is stored in `localStorage`.
 - **Stock screens (admin, pharmacist):** Medicines (list, create/edit, a detail page with batches in
   FEFO order and stock history), Categories, Suppliers, Inventory (all stock, low stock, expiring
-  soon, expired with write-off) and Inventory → Receive stock (one delivery, one line per batch).
+  soon, expired with write-off) and Deliveries (below).
   Batches are adjusted from the medicine page or the expiring list. Search, filters and page live in
   the URL, so Back and reload keep them.
 - **Forms** validate with the shared Zod schemas through `parseForm` (`src/lib/form.ts`), and API
@@ -123,6 +129,15 @@ behind Nginx in production. Start the API first.
   `refundableAmount` on `GET /api/returns/returnable`); it goes back cash first, then card, then
   wallet unless staff choose the split. A cashier's return waits as _Awaiting approval_ until an
   admin or pharmacist approves or rejects it (with a reason) on its page.
+- **Deliveries (every role; cashiers see only the ones they entered):** **Receive stock** takes one
+  supplier delivery from its invoice, one line per batch. A line names a catalogue medicine or, via
+  _Not in the list?_ (or _Add "…" as a new medicine_ when the search finds nothing), describes a new
+  one: name, generic, barcode, category, unit, selling price. Staff's deliveries go into stock at
+  once. A cashier's waits as _Awaiting approval_, counted on a badge next to Deliveries in staff's
+  menu; staff **Correct** it if it doesn't match the invoice (the cashier who entered it may also
+  edit it while pending), then **Approve** (new medicines, batches and stock are created then) or
+  **Reject** with a reason. Until then nothing from it can be sold. `/inventory/receive` redirects
+  here.
 - **Users (admin):** list with role, status and search; create, edit name/email/role, reset a
   password (signs the user out everywhere), deactivate and activate. Your own role and deactivating
   yourself are locked, with the reason shown.

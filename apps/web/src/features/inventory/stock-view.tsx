@@ -164,7 +164,7 @@ export function StockView({ list: { params, update } }: { list: InventoryListPar
                               aria-label={`Receive stock for ${row.medicine.name}`}
                               title="Receive stock"
                             >
-                              <Link to={`/inventory/receive?medicineId=${row.medicine.id}`}>
+                              <Link to={`/deliveries/new?medicineId=${row.medicine.id}`}>
                                 <PackagePlusIcon className="size-5" />
                               </Link>
                             </Button>

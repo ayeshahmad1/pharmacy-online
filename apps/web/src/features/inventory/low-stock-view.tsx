@@ -115,7 +115,7 @@ export function LowStockView({ list: { params, update } }: { list: InventoryList
                         </TableCell>
                         <TableCell>
                           <Button asChild variant="outline" size="sm">
-                            <Link to={`/inventory/receive?medicineId=${row.medicine.id}`}>
+                            <Link to={`/deliveries/new?medicineId=${row.medicine.id}`}>
                               <PackagePlusIcon /> Receive
                             </Link>
                           </Button>

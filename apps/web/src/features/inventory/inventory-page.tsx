@@ -48,7 +48,7 @@ export function InventoryPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <PageIntro description="Stock on hand is the sum of every batch's movements. Expired batches are never sold." />
         <Button asChild className="shrink-0">
-          <Link to="/inventory/receive">
+          <Link to="/deliveries/new">
             <PackagePlusIcon /> Receive stock
           </Link>
         </Button>

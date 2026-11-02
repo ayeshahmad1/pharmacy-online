@@ -249,6 +249,7 @@ export const api = {
     apiRequest<T>(path, { query, signal, ...limit }),
   post: <T>(path: string, body?: unknown, limit?: Limit) =>
     apiRequest<T>(path, { method: 'POST', body, ...limit }),
+  put: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'PUT', body }),
   patch: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
   download: apiDownload,

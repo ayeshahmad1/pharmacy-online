@@ -1,11 +1,13 @@
 import { NavLink } from 'react-router';
 import { BrandMark } from '@/components/brand-mark';
 import { useCurrentUser } from '@/features/auth/auth-context';
-import { navForRole, navLabel } from '@/lib/navigation';
+import { PendingDeliveriesBadge } from '@/features/deliveries/pending-deliveries-badge';
+import { STAFF_ROLES, navForRole, navLabel } from '@/lib/navigation';
 import { cn } from '@/lib/utils';
 
 export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const user = useCurrentUser();
+  const isStaff = STAFF_ROLES.includes(user.role);
 
   return (
     <div className="flex h-full flex-col text-sidebar-foreground">
@@ -36,6 +38,7 @@ export function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
                   >
                     <item.icon className="size-5 shrink-0" />
                     {navLabel(item, user.role)}
+                    {isStaff && item.path === '/deliveries' && <PendingDeliveriesBadge />}
                   </NavLink>
                 </li>
               ))}

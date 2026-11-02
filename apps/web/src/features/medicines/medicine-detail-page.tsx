@@ -106,7 +106,7 @@ export function MedicineDetailPage() {
           <div className="flex flex-wrap gap-2">
             {m.status === 'ACTIVE' && (
               <Button asChild>
-                <Link to={`/inventory/receive?medicineId=${m.id}`}>
+                <Link to={`/deliveries/new?medicineId=${m.id}`}>
                   <PackagePlusIcon /> Receive stock
                 </Link>
               </Button>
@@ -202,7 +202,7 @@ function StockSection({ medicine }: { medicine: MedicineDto }) {
               action={
                 medicine.status === 'ACTIVE' && (
                   <Button asChild>
-                    <Link to={`/inventory/receive?medicineId=${medicine.id}`}>
+                    <Link to={`/deliveries/new?medicineId=${medicine.id}`}>
                       <PackagePlusIcon /> Receive stock
                     </Link>
                   </Button>

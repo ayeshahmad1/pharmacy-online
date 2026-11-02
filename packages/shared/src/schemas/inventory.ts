@@ -27,7 +27,7 @@ const batchNumberSchema = z
 /** Stock quantities are whole units of the medicine's `unit`. */
 const MAX_QUANTITY = 1_000_000;
 
-const receiveStockItemSchema = z.strictObject({
+export const receiveStockItemSchema = z.strictObject({
   medicineId: z.uuid(),
   batchNumber: batchNumberSchema,
   /** Must be after today (in the pharmacy's timezone); checked by the API. */

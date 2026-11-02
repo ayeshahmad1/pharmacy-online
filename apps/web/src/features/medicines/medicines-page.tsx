@@ -158,7 +158,7 @@ export function MedicinesPage() {
                           </DropdownMenuItem>
                           {medicine.status === 'ACTIVE' && (
                             <DropdownMenuItem asChild>
-                              <Link to={`/inventory/receive?medicineId=${medicine.id}`}>
+                              <Link to={`/deliveries/new?medicineId=${medicine.id}`}>
                                 <PackagePlusIcon /> Receive stock
                               </Link>
                             </DropdownMenuItem>

@@ -1,12 +1,39 @@
-import type { MedicineDto } from '@pharmacy/shared';
+import type { DeliveryDto, MedicineDto } from '@pharmacy/shared';
 import { intInput } from '@/lib/form';
 import { formatMoney, lineTotal, toPaisa } from '@/lib/money';
 import { CRITICAL_EXPIRY_DAYS, daysUntil } from '@/lib/stock-status';
 
-/** One line of a delivery as typed: every field is still form text. */
+/** A medicine that is not in the catalogue yet, as typed on a delivery line. */
+export type NewMedicineDraft = {
+  name: string;
+  genericName: string;
+  barcode: string;
+  categoryId: string;
+  unit: string;
+  sellingPrice: string;
+  reorderLevel: string;
+};
+
+export function emptyNewMedicine(name = ''): NewMedicineDraft {
+  return {
+    name,
+    genericName: '',
+    barcode: '',
+    categoryId: '',
+    unit: 'tablet',
+    sellingPrice: '',
+    reorderLevel: '',
+  };
+}
+
+/**
+ * One line of a delivery as typed: every field is still form text. It names
+ * a catalogue `medicine` or proposes a `newMedicine`, never both.
+ */
 export type ReceiptLine = {
   key: string;
   medicine: MedicineDto | null;
+  newMedicine: NewMedicineDraft | null;
   batchNumber: string;
   expiryDate: string;
   costPrice: string;
@@ -17,6 +44,7 @@ export function emptyLine(medicine: MedicineDto | null = null): ReceiptLine {
   return {
     key: crypto.randomUUID(),
     medicine,
+    newMedicine: null,
     batchNumber: '',
     expiryDate: '',
     costPrice: '',
@@ -30,7 +58,14 @@ export function toReceiptInput(supplierId: string, invoiceNumber: string, lines:
     supplierId,
     invoiceNumber,
     items: lines.map((line) => ({
-      medicineId: line.medicine?.id ?? '',
+      ...(line.newMedicine
+        ? {
+            newMedicine: {
+              ...line.newMedicine,
+              reorderLevel: intInput(line.newMedicine.reorderLevel),
+            },
+          }
+        : { medicineId: line.medicine?.id ?? '' }),
       batchNumber: line.batchNumber,
       expiryDate: line.expiryDate,
       costPrice: line.costPrice,
@@ -80,13 +115,41 @@ export function lineWarnings(line: ReceiptLine, today = new Date()): string[] {
     }
   }
   const cost = toPaisa(line.costPrice);
-  const price = line.medicine && toPaisa(line.medicine.sellingPrice);
-  if (cost !== null && price !== null && price !== undefined && cost > price) {
+  const sellingPrice = line.medicine?.sellingPrice ?? line.newMedicine?.sellingPrice;
+  const price = sellingPrice === undefined ? null : toPaisa(sellingPrice);
+  if (cost !== null && price !== null && cost > price) {
     warnings.push(
-      `Cost is above the selling price (${formatMoney(line.medicine!.sellingPrice)}); check the price or the medicine`,
+      `Cost is above the selling price (${formatMoney(sellingPrice!)}); check the price or the medicine`,
     );
   }
   return warnings;
+}
+
+/** The unit a line's quantity is counted in, once its medicine is known. */
+export const lineUnit = (line: ReceiptLine): string | null =>
+  line.medicine?.unit ?? (line.newMedicine?.unit.trim() || null);
+
+/** A saved delivery back as form lines, for correcting it while it is pending. */
+export function linesFromDelivery(delivery: DeliveryDto): ReceiptLine[] {
+  return delivery.items.map((item) => ({
+    ...emptyLine(item.medicine),
+    newMedicine:
+      item.medicine || !item.newMedicine
+        ? null
+        : {
+            name: item.newMedicine.name,
+            genericName: item.newMedicine.genericName ?? '',
+            barcode: item.newMedicine.barcode ?? '',
+            categoryId: item.newMedicine.category.id,
+            unit: item.newMedicine.unit,
+            sellingPrice: item.newMedicine.sellingPrice,
+            reorderLevel: String(item.newMedicine.reorderLevel),
+          },
+    batchNumber: item.batchNumber,
+    expiryDate: item.expiryDate,
+    costPrice: item.costPrice,
+    quantity: String(item.quantity),
+  }));
 }
 
 /** "YYYY-MM-DD" for tomorrow in the browser's calendar: the earliest receivable expiry. */
