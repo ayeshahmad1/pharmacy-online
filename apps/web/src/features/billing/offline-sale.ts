@@ -195,6 +195,7 @@ export function buildOfflineSale(opts: {
     grandTotal: paisaToAmount(totals.grandTotal),
     changeDue: paisaToAmount(settlement.change),
     amountTendered: paisaToAmount(totals.grandTotal + settlement.change),
+    customerName: body.customerName ?? null,
     notes: body.notes ?? null,
     items,
     payments: settlement.payments.map((p, i) => ({ ...p, id: `${cart.idempotencyKey}:pay:${i}` })),

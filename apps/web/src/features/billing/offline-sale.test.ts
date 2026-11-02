@@ -104,8 +104,12 @@ describe('buildOfflineSale', () => {
   const now = new Date('2026-10-24T07:00:00.000Z');
   const user = { id: 'u-1', username: 'counter1', fullName: 'Counter One' };
 
-  function build() {
-    const cart = { ...cartWith([panadol, 4]), discount: { type: 'AMOUNT' as const, value: '3' } };
+  function build(customerName = '') {
+    const cart = {
+      ...cartWith([panadol, 4]),
+      discount: { type: 'AMOUNT' as const, value: '3' },
+      customerName,
+    };
     const totals = priceCart(cart);
     return {
       cart,
@@ -153,5 +157,12 @@ describe('buildOfflineSale', () => {
       ['P2', 2, '1.50', '18.50'],
     ]);
     expect(r.payments).toMatchObject([{ method: 'CASH', amount: '37.00', tendered: '50.00' }]);
+    expect(r.customerName).toBeNull();
+  });
+
+  it('carries the customer name to the queued request and the provisional receipt', () => {
+    const { sale } = build(' Ali Raza ');
+    expect(sale.body.customerName).toBe('Ali Raza');
+    expect(sale.receipt.customerName).toBe('Ali Raza');
   });
 });

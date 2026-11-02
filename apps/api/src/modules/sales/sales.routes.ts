@@ -3,6 +3,7 @@ import {
   daySalesQuerySchema,
   idParamsSchema,
   listSalesQuerySchema,
+  reprintSearchQuerySchema,
   voidSaleBodySchema,
 } from '@pharmacy/shared';
 import { Router } from 'express';
@@ -13,7 +14,8 @@ import * as controller from './sales.controller';
 export const salesRouter = Router();
 
 // Every signed-in role can sell and read sales (cashiers only their own; the
-// service enforces that). Voiding is for sale managers.
+// service enforces that). Any role may reprint any sale's receipt, so a
+// customer can come back to a different cashier. Voiding is for sale managers.
 salesRouter.use(authenticate);
 
 salesRouter.post('/', validate({ body: createSaleBodySchema }), controller.create);
@@ -21,7 +23,13 @@ salesRouter.get('/', validate({ query: listSalesQuerySchema }), controller.list)
 // The day-end slip: everyone's sales for managers, a cashier's own for cashiers.
 salesRouter.get('/day', validate({ query: daySalesQuerySchema }), controller.day);
 salesRouter.get('/cashiers', requireRole(...SALE_MANAGERS), controller.cashiers);
+salesRouter.get(
+  '/reprint',
+  validate({ query: reprintSearchQuerySchema }),
+  controller.reprintSearch,
+);
 salesRouter.get('/:id', validate({ params: idParamsSchema }), controller.get);
+salesRouter.post('/:id/reprint', validate({ params: idParamsSchema }), controller.reprint);
 salesRouter.post(
   '/:id/void',
   requireRole(...SALE_MANAGERS),

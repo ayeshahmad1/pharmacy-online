@@ -18,11 +18,11 @@ import {
 } from '@/components/ui/table';
 import { useCurrentUser } from '@/features/auth/auth-context';
 import { PAYMENT_LABELS } from '@/features/billing/payments';
-import { ReceiptPrintArea } from '@/features/billing/receipt';
 import { returnsApi, returnsKeys } from '@/features/returns/returns-api';
 import { formatDate, formatDateTime, formatQuantity } from '@/lib/format';
 import { formatMoney, toPaisa } from '@/lib/money';
 import { STAFF_ROLES } from '@/lib/navigation';
+import { useReprint } from './reprint';
 import { returnBlocker, voidBlocker } from './sale-actions';
 import { salesApi, salesKeys } from './sales-api';
 import { ReturnStatusBadge, SaleStatusBadge } from './status-badges';
@@ -58,6 +58,7 @@ function SaleDetail({ sale }: { sale: SaleDto }) {
   const user = useCurrentUser();
   const isStaff = STAFF_ROLES.includes(user.role);
   const [voiding, setVoiding] = useState(false);
+  const { reprint, pendingId, printArea } = useReprint();
 
   // Cashiers only get back the returns they raised; staff get every one.
   const returnsQuery = { saleId: sale.id, pageSize: 100 };
@@ -78,7 +79,7 @@ function SaleDetail({ sale }: { sale: SaleDto }) {
     if (voiding || typing || event.ctrlKey || event.metaKey || event.altKey) return;
     if (event.key === 'p' || event.key === 'P') {
       event.preventDefault();
-      window.print();
+      if (!pendingId) reprint(sale.id);
     }
   });
   useEffect(() => {
@@ -89,7 +90,7 @@ function SaleDetail({ sale }: { sale: SaleDto }) {
 
   return (
     <div className="space-y-6">
-      <ReceiptPrintArea sale={sale} />
+      {printArea}
       <div className="space-y-3">
         <BackLink to="/sales">{isStaff ? 'Sales' : 'My sales'}</BackLink>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -100,10 +101,11 @@ function SaleDetail({ sale }: { sale: SaleDto }) {
             </div>
             <p className="text-muted-foreground">
               {formatDateTime(sale.soldAt)} · {sale.cashier.fullName}
+              {sale.customerName && ` · Customer: ${sale.customerName}`}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => window.print()}>
+            <Button variant="outline" disabled={!!pendingId} onClick={() => reprint(sale.id)}>
               <PrinterIcon /> Reprint receipt <Kbd>P</Kbd>
             </Button>
             {!cannotReturn && (

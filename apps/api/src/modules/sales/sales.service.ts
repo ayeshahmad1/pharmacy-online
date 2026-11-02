@@ -5,6 +5,8 @@ import type {
   DaySalesQuery,
   ListSalesQuery,
   Paginated,
+  ReprintMatchDto,
+  ReprintSearchQuery,
   RoleCode,
   SaleDto,
   SaleItemDto,
@@ -12,6 +14,7 @@ import type {
   SaleUserRef,
   VoidSaleBody,
 } from '@pharmacy/shared';
+import { REPRINT_SEARCH_LIMIT } from '@pharmacy/shared';
 import type { Prisma } from '@prisma/client';
 import type { Actor } from '../../lib/actor';
 import { writeAudit } from '../../lib/audit';
@@ -108,6 +111,7 @@ function toSaleDto(s: SaleRow): SaleDto {
     status: s.status,
     soldAt: s.soldAt.toISOString(),
     cashier: s.cashier,
+    customerName: s.customerName,
     subtotal: s.subtotal.toFixed(2),
     discountTotal: s.discountTotal.toFixed(2),
     taxTotal: s.taxTotal.toFixed(2),
@@ -284,6 +288,7 @@ export async function createSale(
         discountTotal: formatPaisa(priced.discountTotal),
         grandTotal: formatPaisa(priced.grandTotal),
         changeDue: formatPaisa(settlement.change),
+        customerName: input.customerName ?? null,
         notes: input.notes ?? null,
         ...(soldAt && { soldAt }),
       },
@@ -336,6 +341,7 @@ export async function createSale(
         grandTotal: formatPaisa(priced.grandTotal),
         changeDue: formatPaisa(settlement.change),
         discount: input.discount ?? null,
+        ...(input.customerName && { customerName: input.customerName }),
         ...(input.offline && { offline: input.offline }),
         ...(review && {
           approvedBy: review.by.id,
@@ -591,6 +597,7 @@ function toSummaryDto(s: SummaryRow): SaleSummaryDto {
     status: s.status,
     soldAt: s.soldAt.toISOString(),
     cashier: s.cashier,
+    customerName: s.customerName,
     subtotal: s.subtotal.toFixed(2),
     discountTotal: s.discountTotal.toFixed(2),
     taxTotal: s.taxTotal.toFixed(2),
@@ -599,6 +606,12 @@ function toSummaryDto(s: SummaryRow): SaleSummaryDto {
     itemCount: s.items.reduce((sum, i) => sum + i.quantity, 0),
     paymentMethods: [...new Set(s.payments.map((p) => p.method))],
   };
+}
+
+/** Matches a search term against the receipt number or the customer's name. */
+function receiptOrCustomer(q: string): Prisma.SaleWhereInput[] {
+  const contains = { contains: escapeLike(q), mode: 'insensitive' } as const;
+  return [{ receiptNumber: contains }, { customerName: contains }];
 }
 
 /** Sales newest first. Cashiers only see their own. */
@@ -613,7 +626,7 @@ export async function listSales(
   const where: Prisma.SaleWhereInput = {
     status: query.status,
     cashierId: seesAllSales(viewer) ? query.cashierId : viewer.id,
-    ...(query.q && { receiptNumber: { contains: escapeLike(query.q), mode: 'insensitive' } }),
+    ...(query.q && { OR: receiptOrCustomer(query.q) }),
     ...((query.from || query.to) && { soldAt }),
   };
   const [total, rows] = await prisma.$transaction([
@@ -693,4 +706,55 @@ export async function daySales(query: DaySalesQuery, viewer: Viewer): Promise<Da
       voidedTotal: formatPaisa(totals.voidedTotal),
     },
   };
+}
+
+// ─── Reprint ────────────────────────────────────────────────────────────────
+
+/**
+ * Finds old receipts to reprint by receipt number or customer name, newest
+ * first. Unlike the sales list this covers everyone's sales for every role:
+ * a customer may come back to a different cashier. It returns only what is
+ * needed to pick the right receipt.
+ */
+export async function searchReprints(query: ReprintSearchQuery): Promise<ReprintMatchDto[]> {
+  const rows = await prisma.sale.findMany({
+    where: { OR: receiptOrCustomer(query.q) },
+    select: {
+      id: true,
+      receiptNumber: true,
+      status: true,
+      soldAt: true,
+      cashier: userRef,
+      customerName: true,
+      grandTotal: true,
+    },
+    orderBy: [{ soldAt: 'desc' }, { id: 'desc' }],
+    take: REPRINT_SEARCH_LIMIT,
+  });
+  return rows.map((s) => ({
+    ...s,
+    soldAt: s.soldAt.toISOString(),
+    grandTotal: s.grandTotal.toFixed(2),
+  }));
+}
+
+/**
+ * Hands out any sale's receipt for printing again, to any role, and records
+ * who reprinted it: a reprinted receipt can be taken for a return, so every
+ * copy is accounted for.
+ */
+export async function reprintSale(id: string, actor: Actor): Promise<SaleDto> {
+  return prisma.$transaction(async (tx) => {
+    const sale = await tx.sale.findUnique({ where: { id }, include: saleInclude });
+    if (!sale) throw notFound('Sale not found');
+    await writeAudit(tx, {
+      userId: actor.id,
+      action: 'SALE_REPRINT',
+      entityType: 'Sale',
+      entityId: id,
+      after: { receiptNumber: sale.receiptNumber, status: sale.status },
+      meta: actor.meta,
+    });
+    return toSaleDto(sale);
+  });
 }

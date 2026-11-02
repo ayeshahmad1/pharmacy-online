@@ -362,6 +362,8 @@ model Sale {
   grandTotal      Decimal              @db.Decimal(12, 2)
   /// Cash handed back. Sum of Payment.amount always equals grandTotal.
   changeDue       Decimal              @default(0) @db.Decimal(12, 2)
+  /// Optional, as typed at the counter; printed on the receipt.
+  customerName    String?              @db.VarChar(100)
   notes           String?
   /// When the sale happened at the counter. Differs from createdAt for sales
   /// made offline and synced later; reports use this.
@@ -382,6 +384,7 @@ model Sale {
   @@index([cashierId, soldAt]) // "own sales" for cashiers
   @@index([status, soldAt])
   @@index([voidedAt]) // voids by day (cash closing)
+  @@index([customerName(ops: raw("gin_trgm_ops"))], type: Gin, map: "Sale_customerName_trgm_idx")
 }
 
 /// Per-day counters behind document numbers: sale receipts (S-YYYYMMDD-0001)

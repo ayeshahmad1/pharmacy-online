@@ -84,6 +84,8 @@ export const createSaleBodySchema = z
     discount: discountSchema.optional(),
     /** Several entries make a split payment. Empty only for a fully discounted bill. */
     payments: z.array(paymentInputSchema).max(10),
+    /** Optional; printed on the receipt and searchable in the sales list. */
+    customerName: optionalTextSchema(100),
     notes: optionalTextSchema(500),
     /** Only on sales queued offline; see offlineSaleInfoSchema. */
     offline: offlineSaleInfoSchema.optional(),
@@ -117,7 +119,7 @@ export type VoidSaleBody = z.infer<typeof voidSaleBodySchema>;
 
 export const listSalesQuerySchema = paginationQuerySchema
   .extend({
-    /** Receipt number, or part of it (case-insensitive). */
+    /** Part of the receipt number or the customer's name (case-insensitive). */
     q: searchTermSchema.optional(),
     status: z.enum(SALE_STATUSES).optional(),
     /** Ignored for cashiers, who only ever see their own sales. */
@@ -137,6 +139,19 @@ export const daySalesQuerySchema = z.object({
   date: dateOnlySchema.optional(),
 });
 export type DaySalesQuery = z.infer<typeof daySalesQuerySchema>;
+
+/**
+ * Finding an old receipt to reprint. Any role may search every sale here,
+ * not only their own: a customer may come back to a different cashier.
+ */
+export const reprintSearchQuerySchema = z.object({
+  /** Part of the receipt number or the customer's name (case-insensitive). */
+  q: z.string().trim().min(3, 'Type at least 3 characters').max(100),
+});
+export type ReprintSearchQuery = z.infer<typeof reprintSearchQuerySchema>;
+
+/** The most matches a reprint search returns, newest first. */
+export const REPRINT_SEARCH_LIMIT = 10;
 
 // ─── Responses ──────────────────────────────────────────────────────────────
 // All money is a PKR decimal string with 2 decimal places, e.g. "120.50".
@@ -173,6 +188,7 @@ export type SaleSummaryDto = {
   status: SaleStatus;
   soldAt: string;
   cashier: SaleUserRef;
+  customerName: string | null;
   subtotal: string;
   discountTotal: string;
   taxTotal: string;
@@ -218,3 +234,9 @@ export type SaleDto = Omit<SaleSummaryDto, 'itemCount' | 'paymentMethods'> & {
   voidedBy: SaleUserRef | null;
   voidReason: string | null;
 };
+
+/** A reprint search match: enough to pick the right receipt, nothing more. */
+export type ReprintMatchDto = Pick<
+  SaleSummaryDto,
+  'id' | 'receiptNumber' | 'status' | 'soldAt' | 'cashier' | 'customerName' | 'grandTotal'
+>;

@@ -40,13 +40,15 @@ packages/shared/src/ (zod schemas, types, constants)
 6. **Money** uses `Decimal(12,2)` in Postgres and string/decimal handling in code. Never use JS floats for money. Currency is PKR.
 7. **Sales and returns are never hard-deleted.** Use status fields (COMPLETED, VOIDED, REFUNDED) and keep the audit trail.
 8. **Every write action is recorded in `AuditLog`** (who, what, entity, before/after where relevant).
-9. **Roles**: ADMIN (everything), PHARMACIST (inventory, sales, returns, reports), CASHIER (billing and own sales only). Enforce on the **server**, never only in the UI.
+9. **Roles**: ADMIN (everything), PHARMACIST (inventory, sales, returns, reports), CASHIER (billing and own sales only, except that any role may reprint any sale's receipt). Enforce on the **server**, never only in the UI.
 10. Medicines have: name, generic/salt name, barcode, category, unit, reorder level, selling price. Batches have: batch number, expiry date, cost price, quantity received, supplier.
 11. **Sales** (decided in Session 5):
     - Prices always come from the catalogue (`Medicine.sellingPrice`); the client never sends a price. No tax is charged.
-    - Discounts: per line and per bill, as a PKR amount or a percent. The bill discount is spread over the lines by value and each batch line stores its share, so refunds are exact. Cashiers may give at most `CASHIER_MAX_DISCOUNT_PERCENT` (default 10%) of the subtotal in total; pharmacist/admin are not capped.
+    - Discounts: per line and per bill, as a PKR amount or a percent. The bill discount is spread over the lines by value and each batch line stores its share, so refunds are exact. Cashiers may give at most `CASHIER_MAX_DISCOUNT_PERCENT` (default 10%, never above 10%: the API refuses to start with more) of the subtotal in total; pharmacist/admin are not capped.
     - Payments: CASH, CARD, MOBILE_WALLET, split allowed. Change is only given from cash (one cash entry per sale); card/wallet together may not exceed the total.
     - Receipt numbers: `S-YYYYMMDD-NNNN`, restarting each business day (pharmacy timezone), gap-free.
+    - Customer name (decided after Session 13): optional, up to 100 characters, part of the idempotency hash. Printed on the receipt, shown in the sales list and searchable there (with the receipt number).
+    - Reprints (decided after Session 13): any role finds any sale by receipt number or customer name (`GET /api/sales/reprint`, at least 3 characters, 10 newest matches) and reprints it (`POST /api/sales/:id/reprint`, recorded as `SALE_REPRINT` in `AuditLog`). Every reprinted copy is marked "REPRINT" with the reprint time. Cashiers still only list and open their own sales.
     - Every sale carries a client-generated idempotency key (UUID). A repeat returns the original sale (200, `replayed: true`); the same key with a different cart or user is rejected (409 `IDEMPOTENCY_KEY_REUSED`).
     - Void: ADMIN/PHARMACIST only, any time, reason required. Stock goes back to the original batches as RETURN movements linked to the sale item. Not allowed once anything has been returned against the sale, or while a return is pending.
 12. **Returns** (decided in Session 6):

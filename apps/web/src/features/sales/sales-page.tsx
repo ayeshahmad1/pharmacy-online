@@ -1,6 +1,7 @@
 import { SALE_STATUSES } from '@pharmacy/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ReceiptTextIcon, ScanBarcodeIcon } from 'lucide-react';
+import { PrinterIcon, ReceiptTextIcon, ScanBarcodeIcon } from 'lucide-react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { EmptyState } from '@/components/empty-state';
 import { ListToolbar, PageIntro } from '@/components/data/filters';
@@ -24,6 +25,7 @@ import { formatDateTime } from '@/lib/format';
 import { useListParams } from '@/lib/list-params';
 import { formatMoney } from '@/lib/money';
 import { STAFF_ROLES } from '@/lib/navigation';
+import { ReprintDialog } from './reprint-dialog';
 import { salesApi, salesKeys } from './sales-api';
 import { SALE_STATUS_LABELS, SaleStatusBadge } from './status-badges';
 
@@ -37,6 +39,7 @@ export function SalesPage() {
   const navigate = useNavigate();
   const { params, update } = useListParams(FILTERS);
   const { status, cashierId } = params.filters;
+  const [reprinting, setReprinting] = useState(false);
 
   // Hand-edited URLs or a from after to: drop or swap rather than fail the list.
   let from = DATE.test(params.filters.from) ? params.filters.from : '';
@@ -72,22 +75,27 @@ export function SalesPage() {
         description={
           isStaff
             ? 'Every sale rung up at the counter. Open one to reprint its receipt, take a return or void it.'
-            : 'The sales you rang up. Open one to reprint its receipt or take a return.'
+            : 'The sales you rang up. Open one to take a return, or reprint any sale’s receipt.'
         }
       />
       <ListToolbar
         actions={
-          <Button asChild variant="outline">
-            <Link to="/billing">
-              <ScanBarcodeIcon /> New sale
-            </Link>
-          </Button>
+          <>
+            <Button variant="outline" onClick={() => setReprinting(true)}>
+              <PrinterIcon /> Reprint a receipt
+            </Button>
+            <Button asChild variant="outline">
+              <Link to="/billing">
+                <ScanBarcodeIcon /> New sale
+              </Link>
+            </Button>
+          </>
         }
       >
         <SearchInput
           value={params.q}
           onChange={(q) => update({ q }, { replace: true })}
-          placeholder="Search receipt number"
+          placeholder="Search receipt or customer"
           className="sm:w-64"
         />
         <NativeSelect
@@ -145,7 +153,7 @@ export function SalesPage() {
         filtered={filtered}
         onClearFilters={() => update({ q: '', status: '', cashierId: '', from: '', to: '' })}
         onFirstPage={() => update({ page: 1 })}
-        columns={6}
+        columns={7}
         empty={
           <EmptyState
             icon={ReceiptTextIcon}
@@ -173,6 +181,7 @@ export function SalesPage() {
                   <TableRow>
                     <TableHead>Receipt</TableHead>
                     <TableHead>Sold</TableHead>
+                    <TableHead className="hidden sm:table-cell">Customer</TableHead>
                     {isStaff && <TableHead className="hidden md:table-cell">Cashier</TableHead>}
                     <TableHead className="hidden sm:table-cell">Items</TableHead>
                     <TableHead className="hidden lg:table-cell">Paid by</TableHead>
@@ -198,6 +207,9 @@ export function SalesPage() {
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {formatDateTime(sale.soldAt)}
+                      </TableCell>
+                      <TableCell className="hidden max-w-48 truncate sm:table-cell">
+                        {sale.customerName ?? <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       {isStaff && (
                         <TableCell className="hidden md:table-cell">
@@ -231,6 +243,8 @@ export function SalesPage() {
           </div>
         )}
       </ListView>
+
+      {reprinting && <ReprintDialog onClose={() => setReprinting(false)} />}
     </div>
   );
 }

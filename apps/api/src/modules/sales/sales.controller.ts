@@ -1,4 +1,10 @@
-import type { CreateSaleBody, IdParams, ListSalesQuery, VoidSaleBody } from '@pharmacy/shared';
+import type {
+  CreateSaleBody,
+  IdParams,
+  ListSalesQuery,
+  ReprintSearchQuery,
+  VoidSaleBody,
+} from '@pharmacy/shared';
 import type { Request, RequestHandler } from 'express';
 import { actorFrom as actor } from '../../lib/actor';
 import * as service from './sales.service';
@@ -34,4 +40,12 @@ export const get: RequestHandler = async (req, res) => {
 export const voidSale: RequestHandler = async (req, res) => {
   const sale = await service.voidSale(params(req).id, req.body as VoidSaleBody, actor(req));
   res.json({ sale });
+};
+
+export const reprintSearch: RequestHandler = async (req, res) => {
+  res.json({ sales: await service.searchReprints(req.query as unknown as ReprintSearchQuery) });
+};
+
+export const reprint: RequestHandler = async (req, res) => {
+  res.json({ sale: await service.reprintSale(params(req).id, actor(req)) });
 };

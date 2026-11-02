@@ -150,7 +150,12 @@ describe('toSaleBody', () => {
     const b = medicine();
     let cart = cartWith([a, 2], [b, 1]);
     cart = setLineDiscount(cart, b.id, { type: 'PERCENT', value: '5' });
-    cart = { ...cart, discount: { type: 'AMOUNT', value: '3.5' }, notes: '  regular  ' };
+    cart = {
+      ...cart,
+      discount: { type: 'AMOUNT', value: '3.5' },
+      customerName: '  Ali Raza ',
+      notes: '  regular  ',
+    };
 
     const body = toSaleBody(cart, [{ method: 'CASH', amount: '100.00' }]);
     expect(body).toEqual({
@@ -161,17 +166,26 @@ describe('toSaleBody', () => {
       ],
       discount: { type: 'AMOUNT', value: '3.5' },
       payments: [{ method: 'CASH', amount: '100.00' }],
+      customerName: 'Ali Raza',
       notes: 'regular',
     });
   });
 
-  it('leaves out blank discounts and notes', () => {
+  it('leaves out blank discounts, customer name and notes', () => {
     const a = medicine();
-    const cart = setLineDiscount(cartWith([a, 1]), a.id, { type: 'AMOUNT', value: '' });
+    let cart = setLineDiscount(cartWith([a, 1]), a.id, { type: 'AMOUNT', value: '' });
+    cart = { ...cart, customerName: '   ' };
     const body = toSaleBody(cart, []);
     expect(body.items[0]).toEqual({ medicineId: a.id, quantity: 1 });
     expect(body).not.toHaveProperty('discount');
+    expect(body.customerName).toBeUndefined();
     expect(body.notes).toBeUndefined();
+  });
+
+  it('accepts a bill saved before customer names existed', () => {
+    const a = medicine();
+    const { customerName: _gone, ...old } = cartWith([a, 1]);
+    expect(toSaleBody(old, []).customerName).toBeUndefined();
   });
 });
 

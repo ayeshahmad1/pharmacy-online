@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/features/auth/auth-context';
 import { invalidateStock } from '@/features/inventory/inventory-api';
+import { ReprintDialog } from '@/features/sales/reprint-dialog';
 import { errorMessage, isUnreachable } from '@/lib/api';
 import { connectivity } from '@/lib/connectivity';
 import { formatDateTime, formatQuantity } from '@/lib/format';
@@ -67,6 +68,7 @@ type DialogState =
   | { type: 'held' }
   | { type: 'clear' }
   | { type: 'daySlip' }
+  | { type: 'reprint' }
   | { type: 'done'; sale: SaleDto; replayed: boolean; provisional: boolean };
 
 /** The sale went to the server, or was queued on this device to sync later. */
@@ -86,8 +88,8 @@ const DRAFT_SAVE_DELAY_MS = 250;
 /**
  * The counter's billing screen. Keyboard first: the search box always has
  * focus between actions, a scanner's Enter adds the item, and every action
- * has a function key (F2 search, F3 day slip, F4 quantity, F6/F7 discounts,
- * F8 pay, F9 hold, F10 held bills, Esc clear). Every control is also a large button
+ * has a function key (F1 reprint, F2 search, F3 day slip, F4 quantity, F6/F7
+ * discounts, F8 pay, F9 hold, F10 held bills, Esc clear). Every control is also a large button
  * for touch use on a tablet.
  *
  * The cart is saved on this device as it changes, so a reload, a dropped
@@ -499,6 +501,8 @@ export function BillingPage() {
       action();
     };
     switch (event.key) {
+      case 'F1':
+        return run(() => setDialog({ type: 'reprint' }));
       case 'F2':
         return run(focusSearch);
       case 'F3':
@@ -646,11 +650,15 @@ export function BillingPage() {
           units={units}
           heldCount={held.data?.length ?? 0}
           billDiscountError={problem?.billDiscount ?? totals.billDiscountError}
+          customerName={cart.customerName ?? ''}
+          onCustomerName={(customerName) => setCart((c) => ({ ...c, customerName }))}
+          onCustomerNameDone={focusSearch}
           onBillDiscount={() => setDialog({ type: 'discount', medicineId: null })}
           onPay={openPay}
           onHold={() => setDialog({ type: 'hold' })}
           onHeldBills={() => setDialog({ type: 'held' })}
           onDaySlip={() => setDialog({ type: 'daySlip' })}
+          onReprint={() => setDialog({ type: 'reprint' })}
           onClear={() => setDialog({ type: 'clear' })}
         />
       </aside>
@@ -706,6 +714,9 @@ export function BillingPage() {
       )}
       {dialog?.type === 'daySlip' && (
         <DaySlipDialog onClose={() => setDialog(null)} onCloseAutoFocus={returnFocus} />
+      )}
+      {dialog?.type === 'reprint' && (
+        <ReprintDialog onClose={() => setDialog(null)} onCloseAutoFocus={returnFocus} />
       )}
       {dialog?.type === 'done' && (
         <SaleCompleteDialog

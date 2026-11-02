@@ -45,13 +45,20 @@ export function Row({ left, right, strong }: { left: string; right: string; stro
 
 export const Rule = () => <div className="my-1.5 border-t border-dashed border-black" />;
 
+type ReceiptProps = {
+  sale: SaleDto;
+  provisional?: boolean;
+  /** When this copy was reprinted; marks it as a reprint, not the original. */
+  reprintedAt?: string;
+};
+
 /**
  * An 80mm thermal receipt for a saved sale. Everything on it comes from the
  * server's record of the sale, never from the cart, so it shows exactly what
  * was charged. A `provisional` receipt is for a sale made offline: built on
  * this device, numbered with its offline reference, batches as predicted.
  */
-export function Receipt({ sale, provisional = false }: { sale: SaleDto; provisional?: boolean }) {
+export function Receipt({ sale, provisional = false, reprintedAt }: ReceiptProps) {
   const units = sale.items.reduce((sum, i) => sum + i.quantity, 0);
   return (
     <div className="receipt font-mono text-[12px] leading-snug text-black">
@@ -63,8 +70,15 @@ export function Receipt({ sale, provisional = false }: { sale: SaleDto; provisio
       <Rule />
       <Row left="Receipt" right={sale.receiptNumber} strong />
       <Row left={formatDateTime(sale.soldAt)} right={sale.cashier.fullName} />
+      {sale.customerName && <p className="break-words">Customer: {sale.customerName}</p>}
       {sale.status !== 'COMPLETED' && (
         <p className="text-center font-bold">*** {sale.status} ***</p>
+      )}
+      {reprintedAt && (
+        <>
+          <p className="text-center font-bold">*** REPRINT ***</p>
+          <p className="text-center text-[11px]">Reprinted {formatDateTime(reprintedAt)}</p>
+        </>
       )}
       {provisional && (
         <p className="text-center text-[11px]">
@@ -132,10 +146,10 @@ export function PrintArea({ children }: { children: ReactNode }) {
   );
 }
 
-export function ReceiptPrintArea({ sale, provisional }: { sale: SaleDto; provisional?: boolean }) {
+export function ReceiptPrintArea(props: ReceiptProps) {
   return (
     <PrintArea>
-      <Receipt sale={sale} provisional={provisional} />
+      <Receipt {...props} />
     </PrintArea>
   );
 }

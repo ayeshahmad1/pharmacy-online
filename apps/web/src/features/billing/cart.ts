@@ -36,11 +36,22 @@ export type Cart = {
    * response was lost is never saved twice. A new bill gets a new key.
    */
   idempotencyKey: string;
+  /** Optional, printed on the receipt. Missing on bills saved on a device before it existed. */
+  customerName?: string;
   notes: string;
 };
 
+/** The longest customer name the API takes. */
+export const MAX_CUSTOMER_NAME = 100;
+
 export function newCart(): Cart {
-  return { lines: [], discount: null, idempotencyKey: crypto.randomUUID(), notes: '' };
+  return {
+    lines: [],
+    discount: null,
+    idempotencyKey: crypto.randomUUID(),
+    customerName: '',
+    notes: '',
+  };
 }
 
 export const cartUnits = (cart: Cart) => cart.lines.reduce((sum, l) => sum + l.quantity, 0);
@@ -232,6 +243,7 @@ export function toSaleBody(cart: Cart, payments: CreateSaleBody['payments']): Cr
     }),
     ...(billDiscount && { discount: billDiscount }),
     payments,
+    customerName: cart.customerName?.trim() || undefined,
     notes: cart.notes.trim() || undefined,
   };
 }

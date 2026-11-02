@@ -3,15 +3,18 @@ import {
   ListRestartIcon,
   PauseIcon,
   PercentIcon,
+  PrinterIcon,
   ReceiptTextIcon,
+  UserIcon,
   XIcon,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Kbd } from '@/components/ui/kbd';
 import { formatMoney } from '@/lib/money';
 import { cn } from '@/lib/utils';
-import type { CartTotals } from './cart';
+import { MAX_CUSTOMER_NAME, type CartTotals } from './cart';
 
 type Props = {
   totals: CartTotals;
@@ -19,11 +22,16 @@ type Props = {
   units: number;
   heldCount: number;
   billDiscountError: string | null;
+  customerName: string;
+  onCustomerName: (name: string) => void;
+  /** Enter or Esc in the customer name: back to the search box. */
+  onCustomerNameDone: () => void;
   onBillDiscount: () => void;
   onPay: () => void;
   onHold: () => void;
   onHeldBills: () => void;
   onDaySlip: () => void;
+  onReprint: () => void;
   onClear: () => void;
 };
 
@@ -38,16 +46,42 @@ export function TotalsPanel({
   units,
   heldCount,
   billDiscountError,
+  customerName,
+  onCustomerName,
+  onCustomerNameDone,
   onBillDiscount,
   onPay,
   onHold,
   onHeldBills,
   onDaySlip,
+  onReprint,
   onClear,
 }: Props) {
   const empty = lineCount === 0;
+
+  function onCustomerKey(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Enter' || event.key === 'Escape') {
+      // Handled here: Esc must not also offer to clear the bill.
+      event.preventDefault();
+      onCustomerNameDone();
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 shadow-sm md:h-full md:p-4">
+      <div className="relative">
+        <UserIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          aria-label="Customer name (optional)"
+          placeholder="Customer name (optional)"
+          autoComplete="off"
+          maxLength={MAX_CUSTOMER_NAME}
+          className="h-10 pl-9"
+          value={customerName}
+          onChange={(e) => onCustomerName(e.target.value)}
+          onKeyDown={onCustomerKey}
+        />
+      </div>
       <dl className="hidden gap-1.5 text-sm tabular-nums md:grid">
         <Line label={`Subtotal · ${units} ${units === 1 ? 'item' : 'items'}`}>
           {formatMoney(totals.subtotal)}
@@ -143,7 +177,16 @@ export function TotalsPanel({
           label="Day slip"
           shortcut="F3"
         />
+        {/* Not in the phone's sticky bar, which has no room: Sales has it too. */}
         <ActionButton
+          className="hidden md:flex"
+          onClick={onReprint}
+          icon={<PrinterIcon />}
+          label="Reprint"
+          shortcut="F1"
+        />
+        <ActionButton
+          className="md:col-span-2"
           onClick={onClear}
           disabled={empty}
           icon={<XIcon />}
