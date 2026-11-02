@@ -1,5 +1,6 @@
 import type {
   CreateSaleBody,
+  DaySalesDto,
   SaleDto,
   SellableMedicineDto,
   SubstitutesDto,
@@ -16,6 +17,7 @@ export const billingKeys = {
   search: (q: string) => ['billing', 'search', q] as const,
   substitutes: (medicineId: string) => ['billing', 'substitutes', medicineId] as const,
   heldBills: ['billing', 'held-bills'] as const,
+  daySales: ['billing', 'day-sales'] as const,
 };
 
 /**
@@ -71,4 +73,6 @@ export const billingApi = {
   /** A replay (same idempotency key, same cart) returns the sale saved the first time. */
   createSale: (body: CreateSaleBody) =>
     api.post<{ sale: SaleDto; replayed: boolean }>('/sales', body),
+  /** Today's sales (the server's business day), for the day-end slip. Online only. */
+  daySales: (signal?: AbortSignal) => api.get<DaySalesDto>('/sales/day', undefined, signal),
 };

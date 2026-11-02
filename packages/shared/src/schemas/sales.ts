@@ -132,6 +132,12 @@ export const listSalesQuerySchema = paginationQuerySchema
   });
 export type ListSalesQuery = z.infer<typeof listSalesQuerySchema>;
 
+export const daySalesQuerySchema = z.object({
+  /** A day in the pharmacy's timezone (midnight to midnight); today when left out. */
+  date: dateOnlySchema.optional(),
+});
+export type DaySalesQuery = z.infer<typeof daySalesQuerySchema>;
+
 // ─── Responses ──────────────────────────────────────────────────────────────
 // All money is a PKR decimal string with 2 decimal places, e.g. "120.50".
 
@@ -175,6 +181,30 @@ export type SaleSummaryDto = {
   /** Total units sold across all lines. */
   itemCount: number;
   paymentMethods: PaymentMethod[];
+};
+
+/**
+ * Every sale rung up on one business day, for the day-end slip printed at the
+ * counter. Voided sales are listed but left out of the totals.
+ */
+export type DaySalesDto = {
+  /** The business day, "YYYY-MM-DD". */
+  date: string;
+  /** The cashier whose own sales these are, or null when it covers everyone. */
+  cashier: SaleUserRef | null;
+  /** Oldest first. */
+  sales: SaleSummaryDto[];
+  totals: {
+    /** Sales that count (not voided). */
+    saleCount: number;
+    itemCount: number;
+    discountTotal: string;
+    grandTotal: string;
+    /** What those sales were paid with; adds up to grandTotal. */
+    byMethod: Record<PaymentMethod, string>;
+    voidedCount: number;
+    voidedTotal: string;
+  };
 };
 
 export type SaleDto = Omit<SaleSummaryDto, 'itemCount' | 'paymentMethods'> & {

@@ -2,7 +2,12 @@
 // payment settlement. No database access, so every rule here is unit-tested
 // directly (sales.calc.test.ts). All money is in paisa (see lib/money.ts).
 
-import type { DiscountInput, PaymentMethod } from '@pharmacy/shared';
+import {
+  type DiscountInput,
+  PAYMENT_METHODS,
+  type PaymentMethod,
+  type SaleStatus,
+} from '@pharmacy/shared';
 import { badRequest } from '../../lib/errors';
 import { type Paisa, allocate, formatPaisa, percentOf, sumPaisa, toPaisa } from '../../lib/money';
 
@@ -193,4 +198,48 @@ export function settlePayments(grandTotal: Paisa, tenders: TenderInput[]): Settl
       : { method: t.method, amount: t.amount, tendered: null, reference: t.reference },
   );
   return { payments, tendered, change };
+}
+
+// ─── Day totals ─────────────────────────────────────────────────────────────
+
+export type DaySale = {
+  status: SaleStatus;
+  itemCount: number;
+  discountTotal: Paisa;
+  grandTotal: Paisa;
+  payments: { method: PaymentMethod; amount: Paisa }[];
+};
+
+export type DayTotals = {
+  saleCount: number;
+  itemCount: number;
+  discountTotal: Paisa;
+  grandTotal: Paisa;
+  byMethod: Record<PaymentMethod, Paisa>;
+  voidedCount: number;
+  voidedTotal: Paisa;
+};
+
+/**
+ * Totals for the day-end slip. A voided sale never happened as far as the
+ * takings go, so it is only counted on its own; every other sale counts in
+ * full, whatever was returned against it later.
+ */
+export function summarizeDay(sales: DaySale[]): DayTotals {
+  const counted = sales.filter((s) => s.status !== 'VOIDED');
+  const voided = sales.filter((s) => s.status === 'VOIDED');
+  const byMethod = Object.fromEntries(PAYMENT_METHODS.map((m) => [m, 0n])) as Record<
+    PaymentMethod,
+    Paisa
+  >;
+  for (const p of counted.flatMap((s) => s.payments)) byMethod[p.method] += p.amount;
+  return {
+    saleCount: counted.length,
+    itemCount: counted.reduce((sum, s) => sum + s.itemCount, 0),
+    discountTotal: sumPaisa(counted.map((s) => s.discountTotal)),
+    grandTotal: sumPaisa(counted.map((s) => s.grandTotal)),
+    byMethod,
+    voidedCount: voided.length,
+    voidedTotal: sumPaisa(voided.map((s) => s.grandTotal)),
+  };
 }

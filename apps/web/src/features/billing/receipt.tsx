@@ -1,4 +1,5 @@
 import type { SaleDto, SaleItemDto } from '@pharmacy/shared';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDateTime } from '@/lib/format';
 import { formatMoney, toPaisa } from '@/lib/money';
@@ -16,7 +17,7 @@ export const receiptConfig = {
 };
 
 /** Money without the "Rs" prefix, for receipt columns. */
-const amount = (value: string | bigint) => formatMoney(value).replace(/^Rs /, '');
+export const amount = (value: string | bigint) => formatMoney(value).replace(/^Rs /, '');
 const isZero = (value: string) => toPaisa(value) === 0n;
 
 /** "2027-06-30" → "06/27": what fits on a receipt line. */
@@ -33,7 +34,7 @@ function groupByMedicine(items: SaleItemDto[]) {
   return groups;
 }
 
-function Row({ left, right, strong }: { left: string; right: string; strong?: boolean }) {
+export function Row({ left, right, strong }: { left: string; right: string; strong?: boolean }) {
   return (
     <div className={cn('flex justify-between gap-2', strong && 'font-bold')}>
       <span className="min-w-0">{left}</span>
@@ -42,7 +43,7 @@ function Row({ left, right, strong }: { left: string; right: string; strong?: bo
   );
 }
 
-const Rule = () => <div className="my-1.5 border-t border-dashed border-black" />;
+export const Rule = () => <div className="my-1.5 border-t border-dashed border-black" />;
 
 /**
  * An 80mm thermal receipt for a saved sale. Everything on it comes from the
@@ -119,14 +120,22 @@ export function Receipt({ sale, provisional = false }: { sale: SaleDto; provisio
 }
 
 /**
- * Mounts the receipt where print CSS can find it. While this is mounted,
- * printing the page prints only the receipt (see .receipt-print in index.css).
+ * Mounts a slip where print CSS can find it. While this is mounted, printing
+ * the page prints only the slip (see .receipt-print in index.css).
  */
-export function ReceiptPrintArea({ sale, provisional }: { sale: SaleDto; provisional?: boolean }) {
+export function PrintArea({ children }: { children: ReactNode }) {
   return createPortal(
     <div className="receipt-print" aria-hidden>
-      <Receipt sale={sale} provisional={provisional} />
+      {children}
     </div>,
     document.body,
+  );
+}
+
+export function ReceiptPrintArea({ sale, provisional }: { sale: SaleDto; provisional?: boolean }) {
+  return (
+    <PrintArea>
+      <Receipt sale={sale} provisional={provisional} />
+    </PrintArea>
   );
 }

@@ -67,15 +67,23 @@ behind Nginx in production. Start the API first.
 - **Billing (every role):** keyboard first. The search box has focus between actions and matches
   brand name, generic/salt name or an exact barcode (a scanner types the code and Enter, which adds
   it at once; `3*` before a scan adds three). Out-of-stock or expired-only medicines open a list of
-  in-stock substitutes with the same salt. Shortcuts: F2 search, ↑/↓ select line, +/− quantity, F4
-  type quantity, F6 line discount, F7 bill discount, F8 pay, F9 hold, F10 held bills, Del remove
-  line, Esc clear. The pay dialog takes cash, card, mobile wallet or a split; change comes only from
+  in-stock substitutes with the same salt. Shortcuts: F2 search, F3 day slip, ↑/↓ select line,
+  +/− quantity, F4 type quantity, F6 line discount, F7 bill discount, F8 pay, F9 hold, F10 held
+  bills, Del remove line, Esc clear. The pay dialog takes cash, card, mobile wallet or a split; change comes only from
   cash. Totals mirror the API's pricing, but the API re-prices every sale and is the authority;
   rejections (short or expired stock, the cashier discount cap) are shown on the line they concern.
   The bill being built and held bills are kept in IndexedDB on the device (`src/offline/`), so a
   reload never loses a cart; prices and stock are re-read on resume. The search uses
   `GET /api/inventory/sellable?q=`, `GET /api/inventory/sellable/:id` and
   `GET /api/inventory/medicines/:id/substitutes`.
+- **Day slip (F3, billing):** prints every sale of today on the 80mm receipt printer as one long
+  slip: receipt number, time, payment method and total per sale, then the count, items, discounts,
+  the day's total and its split by cash/card/wallet. The day runs midnight to midnight in
+  `BUSINESS_TIMEZONE` (Asia/Karachi), the same business day as receipt numbers. Voided sales are
+  listed but not counted; a sale refunded later still counts (refunds are on the cash-closing
+  report). Admin and pharmacist get everyone's sales, a cashier only their own. Built from
+  `GET /api/sales/day[?date=YYYY-MM-DD]`, so it needs the server; offline sales not yet synced are
+  not on it, and the dialog says how many.
 - **Offline billing:** the header shows Online/Offline (whether the API answers, probed at
   `GET /api/ping`), how many sales wait to sync and how many were flagged; click it for details and
   "Sync now". While online the device keeps a copy of every active medicine with its batch stock

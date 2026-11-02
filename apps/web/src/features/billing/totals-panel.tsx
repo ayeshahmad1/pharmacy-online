@@ -1,4 +1,11 @@
-import { BanknoteIcon, ListRestartIcon, PauseIcon, PercentIcon, XIcon } from 'lucide-react';
+import {
+  BanknoteIcon,
+  ListRestartIcon,
+  PauseIcon,
+  PercentIcon,
+  ReceiptTextIcon,
+  XIcon,
+} from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
@@ -16,6 +23,7 @@ type Props = {
   onPay: () => void;
   onHold: () => void;
   onHeldBills: () => void;
+  onDaySlip: () => void;
   onClear: () => void;
 };
 
@@ -34,6 +42,7 @@ export function TotalsPanel({
   onPay,
   onHold,
   onHeldBills,
+  onDaySlip,
   onClear,
 }: Props) {
   const empty = lineCount === 0;
@@ -105,7 +114,7 @@ export function TotalsPanel({
         </Button>
       </div>
 
-      <div className="grid grid-cols-4 gap-2 md:grid-cols-2">
+      <div className="grid grid-cols-5 gap-2 md:grid-cols-2">
         <ActionButton
           className="md:hidden"
           onClick={onBillDiscount}
@@ -129,7 +138,12 @@ export function TotalsPanel({
           badge={heldCount}
         />
         <ActionButton
-          className="md:col-span-2"
+          onClick={onDaySlip}
+          icon={<ReceiptTextIcon />}
+          label="Day slip"
+          shortcut="F3"
+        />
+        <ActionButton
           onClick={onClear}
           disabled={empty}
           icon={<XIcon />}

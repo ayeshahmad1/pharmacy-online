@@ -40,6 +40,7 @@ import {
   type DiscountDraft,
 } from './cart';
 import { CartKeysHint, CartList, focusQuantity } from './cart-list';
+import { DaySlipDialog } from './day-slip';
 import { DiscountDialog, type DiscountTarget } from './discount-dialog';
 import { errorBeep } from './feedback';
 import { MedicineSearch } from './medicine-search';
@@ -65,6 +66,7 @@ type DialogState =
   | { type: 'hold' }
   | { type: 'held' }
   | { type: 'clear' }
+  | { type: 'daySlip' }
   | { type: 'done'; sale: SaleDto; replayed: boolean; provisional: boolean };
 
 /** The sale went to the server, or was queued on this device to sync later. */
@@ -84,8 +86,8 @@ const DRAFT_SAVE_DELAY_MS = 250;
 /**
  * The counter's billing screen. Keyboard first: the search box always has
  * focus between actions, a scanner's Enter adds the item, and every action
- * has a function key (F2 search, F4 quantity, F6/F7 discounts, F8 pay,
- * F9 hold, F10 held bills, Esc clear). Every control is also a large button
+ * has a function key (F2 search, F3 day slip, F4 quantity, F6/F7 discounts,
+ * F8 pay, F9 hold, F10 held bills, Esc clear). Every control is also a large button
  * for touch use on a tablet.
  *
  * The cart is saved on this device as it changes, so a reload, a dropped
@@ -499,6 +501,8 @@ export function BillingPage() {
     switch (event.key) {
       case 'F2':
         return run(focusSearch);
+      case 'F3':
+        return run(() => setDialog({ type: 'daySlip' }));
       case 'F4':
         return run(() => selectedId && focusQuantity(selectedId));
       case 'F6':
@@ -646,6 +650,7 @@ export function BillingPage() {
           onPay={openPay}
           onHold={() => setDialog({ type: 'hold' })}
           onHeldBills={() => setDialog({ type: 'held' })}
+          onDaySlip={() => setDialog({ type: 'daySlip' })}
           onClear={() => setDialog({ type: 'clear' })}
         />
       </aside>
@@ -698,6 +703,9 @@ export function BillingPage() {
           onClose={() => setDialog(null)}
           onCloseAutoFocus={returnFocus}
         />
+      )}
+      {dialog?.type === 'daySlip' && (
+        <DaySlipDialog onClose={() => setDialog(null)} onCloseAutoFocus={returnFocus} />
       )}
       {dialog?.type === 'done' && (
         <SaleCompleteDialog

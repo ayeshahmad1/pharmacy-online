@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { AppError } from '../../lib/errors';
 import { formatPaisa, sumPaisa, toPaisa } from '../../lib/money';
 import {
+  type DaySale,
   type TenderInput,
   allocateFefo,
   discountCap,
   priceSale,
   settlePayments,
   splitLine,
+  summarizeDay,
 } from './sales.calc';
 
 const pkr = toPaisa;
@@ -244,5 +246,82 @@ describe('settlePayments', () => {
 
   it('rejects no payment for a bill that is due', () => {
     expectBadRequest(() => settlePayments(pkr('1'), []), /short by 1.00/);
+  });
+});
+
+describe('summarizeDay', () => {
+  const sale = (
+    status: DaySale['status'],
+    grandTotal: string,
+    payments: [DaySale['payments'][number]['method'], string][],
+    discountTotal = '0',
+    itemCount = 1,
+  ): DaySale => ({
+    status,
+    itemCount,
+    discountTotal: pkr(discountTotal),
+    grandTotal: pkr(grandTotal),
+    payments: payments.map(([method, amount]) => ({ method, amount: pkr(amount) })),
+  });
+
+  it('is all zeros for a day with no sales', () => {
+    expect(summarizeDay([])).toEqual({
+      saleCount: 0,
+      itemCount: 0,
+      discountTotal: 0n,
+      grandTotal: 0n,
+      byMethod: { CASH: 0n, CARD: 0n, MOBILE_WALLET: 0n },
+      voidedCount: 0,
+      voidedTotal: 0n,
+    });
+  });
+
+  it('adds up sales and splits the takings by payment method', () => {
+    const totals = summarizeDay([
+      sale('COMPLETED', '250.00', [['CASH', '250.00']], '10.00', 3),
+      sale(
+        'COMPLETED',
+        '99.50',
+        [
+          ['CASH', '40.00'],
+          ['CARD', '59.50'],
+        ],
+        '0',
+        2,
+      ),
+      sale('COMPLETED', '15.25', [['MOBILE_WALLET', '15.25']], '0.75', 1),
+    ]);
+    expect(totals).toMatchObject({
+      saleCount: 3,
+      itemCount: 6,
+      discountTotal: pkr('10.75'),
+      grandTotal: pkr('364.75'),
+      byMethod: { CASH: pkr('290.00'), CARD: pkr('59.50'), MOBILE_WALLET: pkr('15.25') },
+    });
+    const { CASH, CARD, MOBILE_WALLET } = totals.byMethod;
+    expect(CASH + CARD + MOBILE_WALLET).toBe(totals.grandTotal);
+  });
+
+  it('leaves voided sales out of the totals and counts them on their own', () => {
+    const totals = summarizeDay([
+      sale('COMPLETED', '100.00', [['CASH', '100.00']]),
+      sale('VOIDED', '40.00', [['CARD', '40.00']], '5.00', 4),
+      sale('VOIDED', '20.00', [['CASH', '20.00']]),
+    ]);
+    expect(totals).toMatchObject({
+      saleCount: 1,
+      itemCount: 1,
+      discountTotal: 0n,
+      grandTotal: pkr('100.00'),
+      byMethod: { CASH: pkr('100.00'), CARD: 0n, MOBILE_WALLET: 0n },
+      voidedCount: 2,
+      voidedTotal: pkr('60.00'),
+    });
+  });
+
+  it('still counts a sale that was refunded later', () => {
+    const totals = summarizeDay([sale('REFUNDED', '75.00', [['CASH', '75.00']])]);
+    expect(totals.saleCount).toBe(1);
+    expect(totals.grandTotal).toBe(pkr('75.00'));
   });
 });

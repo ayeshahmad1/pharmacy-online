@@ -1,5 +1,6 @@
 import {
   createSaleBodySchema,
+  daySalesQuerySchema,
   idParamsSchema,
   listSalesQuerySchema,
   voidSaleBodySchema,
@@ -17,6 +18,8 @@ salesRouter.use(authenticate);
 
 salesRouter.post('/', validate({ body: createSaleBodySchema }), controller.create);
 salesRouter.get('/', validate({ query: listSalesQuerySchema }), controller.list);
+// The day-end slip: everyone's sales for managers, a cashier's own for cashiers.
+salesRouter.get('/day', validate({ query: daySalesQuerySchema }), controller.day);
 salesRouter.get('/cashiers', requireRole(...SALE_MANAGERS), controller.cashiers);
 salesRouter.get('/:id', validate({ params: idParamsSchema }), controller.get);
 salesRouter.post(

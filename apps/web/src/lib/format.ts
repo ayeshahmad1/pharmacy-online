@@ -30,6 +30,14 @@ export function formatDateTime(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : dateTimeFormat.format(date);
 }
 
+const timeFormat = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+/** An ISO timestamp's time of day in the browser's local time, e.g. "14:05". */
+export function formatTime(iso: string): string {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso : timeFormat.format(date);
+}
+
 /** 1200 tablet → "1,200 tablets". Units are stored lowercase and singular. */
 export function formatQuantity(quantity: number, unit?: string): string {
   const n = quantity.toLocaleString('en-US');

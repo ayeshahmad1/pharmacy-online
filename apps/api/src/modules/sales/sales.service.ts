@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type {
   CreateSaleBody,
+  DaySalesDto,
+  DaySalesQuery,
   ListSalesQuery,
   Paginated,
   RoleCode,
@@ -37,6 +39,7 @@ import {
   priceSale,
   settlePayments,
   splitLine,
+  summarizeDay,
 } from './sales.calc';
 
 /** The signed-in user making a sale; the role decides the discount cap. */
@@ -637,4 +640,57 @@ export async function listSaleCashiers(): Promise<SaleUserRef[]> {
     select: userRef.select,
     orderBy: [{ fullName: 'asc' }, { username: 'asc' }],
   });
+}
+
+const daySaleInclude = {
+  ...summaryInclude,
+  payments: { select: { method: true, amount: true }, orderBy: { method: 'asc' } },
+} satisfies Prisma.SaleInclude;
+
+/**
+ * Every sale rung up on one business day (midnight to midnight in the
+ * pharmacy's timezone), oldest first, with the day's totals: the day-end
+ * slip. Cashiers get only their own sales.
+ */
+export async function daySales(query: DaySalesQuery, viewer: Viewer): Promise<DaySalesDto> {
+  const date = query.date ?? businessToday();
+  const ownOnly = !seesAllSales(viewer);
+  const [rows, cashier] = await Promise.all([
+    prisma.sale.findMany({
+      where: {
+        soldAt: { gte: startOfBusinessDay(date), lt: startOfBusinessDay(addDays(date, 1)) },
+        ...(ownOnly && { cashierId: viewer.id }),
+      },
+      include: daySaleInclude,
+      orderBy: [{ soldAt: 'asc' }, { id: 'asc' }],
+    }),
+    ownOnly ? prisma.user.findUnique({ where: { id: viewer.id }, ...userRef }) : null,
+  ]);
+
+  const sales = rows.map(toSummaryDto);
+  const totals = summarizeDay(
+    rows.map((s, i) => ({
+      status: s.status,
+      itemCount: sales[i]!.itemCount,
+      discountTotal: toPaisa(s.discountTotal),
+      grandTotal: toPaisa(s.grandTotal),
+      payments: s.payments.map((p) => ({ method: p.method, amount: toPaisa(p.amount) })),
+    })),
+  );
+  return {
+    date,
+    cashier,
+    sales,
+    totals: {
+      ...totals,
+      discountTotal: formatPaisa(totals.discountTotal),
+      grandTotal: formatPaisa(totals.grandTotal),
+      byMethod: {
+        CASH: formatPaisa(totals.byMethod.CASH),
+        CARD: formatPaisa(totals.byMethod.CARD),
+        MOBILE_WALLET: formatPaisa(totals.byMethod.MOBILE_WALLET),
+      },
+      voidedTotal: formatPaisa(totals.voidedTotal),
+    },
+  };
 }
