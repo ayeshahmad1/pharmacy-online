@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   api,
+  isUnreachable,
   login,
   logout,
   onSessionEvent,
@@ -10,6 +11,7 @@ import {
   setAccessToken,
   type SessionEvent,
 } from './api';
+import { connectivity } from './connectivity';
 
 const user: AuthResponse['user'] = {
   id: 'u1',
@@ -200,5 +202,75 @@ describe('api client', () => {
     setAccessToken('tok');
     mockFetch(() => json(403, { error: { code: 'FORBIDDEN', message: 'No' } }));
     await expect(api.download('/reports/sales')).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('time limits', () => {
+  /** A server that takes the request and never answers, until the request is aborted. */
+  const hang = (_url: string, init: RequestInit) =>
+    new Promise<Response>((_, reject) => {
+      init.signal?.addEventListener('abort', () =>
+        reject(new DOMException('The operation was aborted.', 'AbortError')),
+      );
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    connectivity.reachable();
+  });
+  afterEach(() => {
+    connectivity.reachable();
+    vi.useRealTimers();
+  });
+
+  it('gives up on a server that is too slow and treats it as unreachable', async () => {
+    mockFetch(hang);
+    const request = api.get('/inventory/sellable', { q: 'pana' }, undefined, { timeoutMs: 4000 });
+    const settled = request.catch((err: unknown) => err);
+
+    await vi.advanceTimersByTimeAsync(3999);
+    expect(connectivity.get().online).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+
+    const err = await settled;
+    expect(err).toMatchObject({ code: 'NETWORK_ERROR', status: 0 });
+    expect(isUnreachable(err)).toBe(true);
+    expect(connectivity.get().online).toBe(false);
+  });
+
+  it("still passes the caller's own cancellation through as an abort", async () => {
+    mockFetch(hang);
+    const controller = new AbortController();
+    const request = api.get('/inventory/sellable', undefined, controller.signal, {
+      timeoutMs: 4000,
+    });
+    controller.abort();
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(connectivity.get().online).toBe(true);
+  });
+
+  it('applies to POSTs, and a fast answer is unaffected', async () => {
+    mockFetch(hang);
+    const slow = api.post('/sales', { items: [] }, { timeoutMs: 12000 }).catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(12000);
+    expect(isUnreachable(await slow)).toBe(true);
+
+    connectivity.reachable();
+    mockFetch(() => json(200, { ok: true }));
+    await expect(api.get('/ping', undefined, undefined, { timeoutMs: 10 })).resolves.toEqual({
+      ok: true,
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(connectivity.get().online).toBe(true);
+  });
+
+  it('never limits a request that did not ask for it (session refresh included)', async () => {
+    mockFetch(hang);
+    let done = false;
+    void refreshSession()
+      .catch(() => undefined)
+      .finally(() => (done = true));
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(done).toBe(false);
   });
 });

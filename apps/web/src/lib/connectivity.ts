@@ -9,6 +9,8 @@ type Listener = () => void;
 
 const PING_URL = '/api/ping';
 const PROBE_DELAYS_MS = [3_000, 5_000, 10_000, 20_000, 30_000];
+/** A ping that hasn't answered by then counts as no answer, so probing never hangs. */
+const PROBE_TIMEOUT_MS = 5_000;
 
 let state: Connectivity = {
   online: typeof navigator === 'undefined' ? true : navigator.onLine,
@@ -53,8 +55,14 @@ export const connectivity = {
   unreachable: () => set(false),
   /** Asks the server whether it is there; any answer from the API itself counts. */
   async probe(): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
     try {
-      const res = await fetch(PING_URL, { cache: 'no-store', credentials: 'same-origin' });
+      const res = await fetch(PING_URL, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        signal: controller.signal,
+      });
       // 5xx here comes from the proxy in front of the API, not the API.
       const ok = res.status < 500;
       set(ok);
@@ -62,6 +70,8 @@ export const connectivity = {
     } catch {
       set(false);
       return false;
+    } finally {
+      clearTimeout(timer);
     }
   },
 };

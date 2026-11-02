@@ -84,9 +84,17 @@ export const catalogueStore = {
   },
 };
 
+/** A download that hasn't started by then is given up and tried again on the next round. */
+const CATALOGUE_TIMEOUT_MS = 60_000;
+
 /** Downloads the current catalogue and saves it on this device. */
 export async function refreshCatalogue(): Promise<CatalogueMeta> {
-  const dto = await api.get<OfflineCatalogueDto>('/inventory/offline-catalogue');
+  const dto = await api.get<OfflineCatalogueDto>(
+    '/inventory/offline-catalogue',
+    undefined,
+    undefined,
+    { timeoutMs: CATALOGUE_TIMEOUT_MS },
+  );
   await catalogueStore.save(dto);
   const { medicines: _m, ...meta } = dto;
   return meta;

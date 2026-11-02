@@ -31,9 +31,15 @@ export const offlineApi = {
     (await api.post<ConflictResponse>(`/offline-sales/conflicts/${id}/dismiss`, body)).conflict,
 };
 
+/**
+ * A queued sale that gets no answer in time is tried again later under the
+ * same idempotency key, so a hung request can't stall the queue.
+ */
+const SYNC_TIMEOUT_MS = 20_000;
+
 /** What the sync engine sends through. */
 export const syncApi: SyncApi = {
-  createSale: (body) => api.post('/sales', body),
+  createSale: (body) => api.post('/sales', body, { timeoutMs: SYNC_TIMEOUT_MS }),
   reportConflict: offlineApi.reportConflict,
   getConflict: offlineApi.getConflict,
 };

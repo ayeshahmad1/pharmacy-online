@@ -85,7 +85,37 @@ type RequestOptions = {
   body?: unknown;
   query?: Query;
   signal?: AbortSignal;
+  /**
+   * Give up if the server hasn't started answering by then, and treat it as
+   * unreachable (NETWORK_ERROR). For calls the counter waits on: a line that
+   * is up but barely moving must not hang billing. Never for /auth/refresh:
+   * a refresh given up on may already have rotated the cookie on the server,
+   * and replaying the old one ends every session.
+   */
+  timeoutMs?: number;
 };
+
+/** The caller's signal, plus an abort after `ms` if given. */
+function withTimeout(signal: AbortSignal | undefined, ms: number | undefined) {
+  if (!ms) return { signal, done: () => undefined, timedOut: () => false };
+  const controller = new AbortController();
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+  }, ms);
+  const forward = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener('abort', forward, { once: true });
+  return {
+    signal: controller.signal,
+    done: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', forward);
+    },
+    timedOut: () => expired,
+  };
+}
 
 function buildUrl(path: string, query?: Query) {
   const params = new URLSearchParams();
@@ -101,6 +131,7 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
   if (options.body !== undefined) headers.set('Content-Type', 'application/json');
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
+  const limit = withTimeout(options.signal, options.timeoutMs);
   let res: Response;
   try {
     res = await fetch(buildUrl(path, options.query), {
@@ -108,13 +139,21 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       credentials: 'same-origin',
-      signal: options.signal,
+      signal: limit.signal,
     });
   } catch (err) {
     // Let cancellations (e.g. TanStack Query unmounts) propagate unchanged.
-    if (err instanceof DOMException && err.name === 'AbortError') throw err;
+    if (err instanceof DOMException && err.name === 'AbortError' && !limit.timedOut()) throw err;
     connectivity.unreachable();
-    throw new ApiError(0, 'NETWORK_ERROR', 'Cannot reach the server. Check the connection.');
+    throw new ApiError(
+      0,
+      'NETWORK_ERROR',
+      limit.timedOut()
+        ? 'The server is taking too long to answer. Check the connection.'
+        : 'Cannot reach the server. Check the connection.',
+    );
+  } finally {
+    limit.done();
   }
   if (UNREACHABLE.includes(res.status)) connectivity.unreachable();
   else connectivity.reachable();
@@ -202,10 +241,14 @@ export async function apiDownload(
   return { blob: await res.blob(), filename };
 }
 
+/** See RequestOptions.timeoutMs. */
+type Limit = { timeoutMs?: number };
+
 export const api = {
-  get: <T>(path: string, query?: Query, signal?: AbortSignal) =>
-    apiRequest<T>(path, { query, signal }),
-  post: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'POST', body }),
+  get: <T>(path: string, query?: Query, signal?: AbortSignal, limit?: Limit) =>
+    apiRequest<T>(path, { query, signal, ...limit }),
+  post: <T>(path: string, body?: unknown, limit?: Limit) =>
+    apiRequest<T>(path, { method: 'POST', body, ...limit }),
   patch: <T>(path: string, body?: unknown) => apiRequest<T>(path, { method: 'PATCH', body }),
   delete: <T>(path: string) => apiRequest<T>(path, { method: 'DELETE' }),
   download: apiDownload,

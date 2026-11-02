@@ -77,7 +77,10 @@ behind Nginx in production. Start the API first.
   The bill being built and held bills are kept in IndexedDB on the device (`src/offline/`), so a
   reload never loses a cart; prices and stock are re-read on resume. The search uses
   `GET /api/inventory/sellable?q=`, `GET /api/inventory/sellable/:id` and
-  `GET /api/inventory/medicines/:id/substitutes`.
+  `GET /api/inventory/medicines/:id/substitutes`. It is local-first, so a distant or slow server
+  doesn't slow the counter: the medicine list saved on the device (below) answers as you type and
+  the server's answer replaces it when it arrives; a scan plus Enter adds from the device's list
+  without waiting. The server still prices and checks stock when the sale is saved.
 - **Day slip (F3, billing):** prints every sale of today on the 80mm receipt printer as one long
   slip: receipt number, time, payment method and total per sale, then the count, items, discounts,
   the day's total and its split by cash/card/wallet. The day runs midnight to midnight in
@@ -91,7 +94,9 @@ behind Nginx in production. Start the API first.
   "Sync now". While online the device keeps a copy of every active medicine with its batch stock
   (`GET /api/inventory/offline-catalogue`, refreshed every 5 minutes, in IndexedDB). Offline, search
   and substitutes use that copy, with stock reduced by the sales this device has queued (FEFO, expiry
-  by the pharmacy's day). Paying offline, or when the server stops answering mid-sale, checks the
+  by the pharmacy's day). A line that is up but too slow counts as offline: lookups give up after
+  4 s, saving a sale after 12 s, a sync attempt after 20 s and the `/api/ping` probe after 5 s
+  (never the session refresh). Paying offline, or when the server stops answering mid-sale, checks the
   device's stock count and the cashier discount cap, queues the sale under the bill's idempotency key
   and prints a provisional receipt (`OFF-XXXXXXXX`). The queue syncs oldest first on reconnect, after
   each new sale and every 15 s while anything waits, backing off from 5 s to 5 min. The server

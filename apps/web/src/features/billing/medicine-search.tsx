@@ -18,6 +18,7 @@ import { availabilityStatus, isSellable, nextExpiryStatus } from './availability
 import { billingApi, billingKeys } from './billing-api';
 import { parseScan } from './cart';
 import { errorBeep } from './feedback';
+import { enterAction, shownResults } from './search-results';
 
 /** Short enough to feel instant while typing, long enough to skip a request per key. */
 const SEARCH_DEBOUNCE_MS = 120;
@@ -40,9 +41,11 @@ type Props = {
 
 /**
  * The billing search box. Typing searches brand name, generic/salt name and
- * barcode as you type; a scanner types the barcode and Enter, which adds the
- * match at once even before the as-you-type search has caught up. A
- * "qty*" prefix sets the quantity, e.g. "3*" then a scan adds three.
+ * barcode as you type: this device's medicine list answers at once and the
+ * server's answer replaces it when it comes (search-results.ts), so a far-away
+ * or slow server doesn't slow the counter down. A scanner types the barcode
+ * and Enter, which adds the match at once. A "qty*" prefix sets the quantity,
+ * e.g. "3*" then a scan adds three.
  */
 export function MedicineSearch({
   inputRef,
@@ -71,6 +74,22 @@ export function MedicineSearch({
     // Answered from this device's medicine list when offline, so never paused.
     networkMode: 'always',
   });
+  // Not debounced: reading this device's list takes milliseconds.
+  const local = useQuery({
+    queryKey: billingKeys.localSearch(term),
+    queryFn: () => billingApi.searchLocal(term),
+    enabled: term.length > 0 && !substitutesFor,
+    placeholderData: keepPreviousData,
+    staleTime: SEARCH_STALE_MS,
+    networkMode: 'always',
+    // No list saved on this device yet: the server's answer is all there is.
+    retry: false,
+  });
+  const shown = shownResults({
+    term,
+    server: { term: debouncedTerm, items: search.data, placeholder: search.isPlaceholderData },
+    device: { items: local.data, placeholder: local.isPlaceholderData },
+  });
   const substitutes = useQuery({
     queryKey: billingKeys.substitutes(substitutesFor?.id ?? ''),
     queryFn: ({ signal }) => billingApi.substitutes(substitutesFor!.id, signal),
@@ -81,10 +100,8 @@ export function MedicineSearch({
 
   const items: SellableMedicineDto[] = substitutesFor
     ? (substitutes.data?.substitutes ?? [])
-    : term
-      ? (search.data ?? [])
-      : [];
-  const listKey = substitutesFor ? `substitutes:${substitutesFor.id}` : `search:${debouncedTerm}`;
+    : shown.items;
+  const listKey = substitutesFor ? `substitutes:${substitutesFor.id}` : `search:${term}`;
   const highlight = cursor.list === listKey ? Math.min(cursor.index, items.length - 1) : 0;
   const setHighlight = (index: number) => setCursor({ list: listKey, index });
   const open = !!substitutesFor || term.length > 0 || notice !== null;
@@ -122,15 +139,17 @@ export function MedicineSearch({
     }
     if (!term) return;
 
-    // The list on screen belongs to what was typed: Enter takes the highlighted row.
-    const settled = debouncedTerm === term && search.data && !search.isPlaceholderData;
-    if (settled) {
-      if (active) choose(active);
-      else notFound(`Nothing matches “${term}”`);
+    const action = enterAction(shown, active);
+    if (action.kind === 'add') {
+      choose(action.medicine);
+      return;
+    }
+    if (action.kind === 'not-found') {
+      notFound(`Nothing matches “${term}”`);
       return;
     }
 
-    // A scanner got here first: look the term up now and add an exact barcode match.
+    // Nothing on screen answers it yet: look the term up now and add an exact barcode match.
     setResolving(true);
     try {
       const results = await queryClient.fetchQuery({
@@ -271,15 +290,13 @@ export function MedicineSearch({
                   'No generic/salt name is recorded for this medicine, so no substitutes can be suggested.'
                 )
               ) : null
-            ) : search.isError ? (
+            ) : items.length > 0 ? null : search.isError && debouncedTerm === term ? (
               <span className="text-destructive">{errorMessage(search.error)}</span>
-            ) : debouncedTerm !== term || search.isPending ? (
-              items.length === 0 ? (
-                'Searching…'
-              ) : null
-            ) : items.length === 0 ? (
+            ) : shown.source === 'server' ? (
               `Nothing matches “${term}”`
-            ) : null}
+            ) : (
+              'Searching…'
+            )}
           </ListMessage>
           {items.length > 0 && (
             <p className="hidden border-t px-3 py-1.5 text-xs text-muted-foreground sm:block">
