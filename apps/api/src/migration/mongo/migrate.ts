@@ -9,7 +9,8 @@
 // Reads MONGO_URL (database name in the path, or MONGO_DB) and DATABASE_URL.
 //
 // Order is parents first: users → category and suppliers → medicines →
-// batches with their opening stock → sales with lines and payments. Every
+// batches with their opening stock → sales with lines and payments → the
+// delivery history (LegacyPurchase) → legacy returns (LegacyReturn). Every
 // loaded row is recorded in LegacyIdMap with its Mongo _id.
 //
 // Dry run: everything is written inside one transaction, the verification
@@ -22,7 +23,10 @@
 // Stock (decided in Session 13): the old purchase and sale history doesn't
 // add up to the stock Mongo shows, so each batch gets its Mongo quantity as
 // one opening ADJUSTMENT movement and legacy sales are loaded as history
-// without stock movements. Rejected records go to rejects.jsonl, never
+// without stock movements. Purchases and returns are history only too (rule
+// 15): no stock movements, and returns stay out of every report because they
+// name no original sale. Medicines and cashiers deleted from Mongo get
+// inactive placeholders. Rejected records go to rejects.jsonl, never
 // silently dropped.
 
 import { config } from '../../lib/config';
@@ -39,9 +43,12 @@ import {
   Rejected,
   UNKNOWN_SUPPLIER,
   assignReceiptNumbers,
+  isLegacyReturn,
   legacyCount,
   legacyMoney,
+  mapLegacyReturn,
   mapMedicine,
+  mapPurchase,
   mapSale,
   mapUser,
   placeholderExpiry,
@@ -55,6 +62,8 @@ import {
   type LegacySale,
   type LegacyUser,
   type MappedMedicine,
+  type MappedPurchase,
+  type MappedReturn,
   type MappedSale,
   type MappedUser,
 } from './transform';
@@ -197,6 +206,8 @@ type PlannedSale = MappedSale & {
   cashierLegacyId: string;
   receiptNumber: string;
 };
+type PlannedPurchase = MappedPurchase & { legacyId: string };
+type PlannedReturn = MappedReturn & { legacyId: string; cashierLegacyId: string };
 
 type Plan = {
   users: PlannedUser[];
@@ -204,17 +215,22 @@ type Plan = {
   medicines: PlannedMedicine[];
   batches: PlannedBatch[];
   sales: PlannedSale[];
+  purchases: PlannedPurchase[];
+  returns: PlannedReturn[];
   receiptDays: Map<string, number>;
   /** Mongo-side totals for the comparison. */
   source: {
     counts: Record<string, number>;
     saleLines: number;
+    returnLines: number;
     salesPaisa: Paisa;
     returnsPaisa: Paisa;
     returnCount: number;
     rawTotalPrice: number;
     rejectedSalesPaisa: Paisa;
     rejectedSaleCount: number;
+    rejectedReturnsPaisa: Paisa;
+    rejectedReturnCount: number;
     stockByMedicine: Map<string, { name: string; quantity: number }>;
   };
 };
@@ -272,47 +288,123 @@ async function plan(src: Source, existingUsernames: Set<string>, existingEmails:
     }
   }
 
-  // Purchases: only used for cost and quantity received.
-  const purchasesByMedicine = new Map<string, LegacyPurchase[]>();
-  for (const p of src.purchases) {
-    if (!p.medicineId || !medicines.has(p.medicineId)) {
-      const why = p.medicineId && rejectedMedicines.has(p.medicineId) ? 'rejected' : 'deleted';
-      logReject('purchases', p.id, 'PURCHASE_MEDICINE_MISSING', `medicine ${p.medicineId} ${why}`);
-      continue;
+  const mongoMedicineIds = new Set(src.medicines.map((m) => m.id));
+  /**
+   * Medicine deleted from Mongo but named by a sale, return or purchase →
+   * units sold and returned, the latest unit price seen, first and last use.
+   */
+  const deletedMedicines = new Map<
+    string,
+    {
+      sold: number;
+      returned: number;
+      lastPrice: Paisa;
+      pricedAt: number;
+      first: Date;
+      last: Date;
     }
-    const list = purchasesByMedicine.get(p.medicineId) ?? [];
-    list.push(p);
-    purchasesByMedicine.set(p.medicineId, list);
+  >();
+  function noteMedicine(
+    legacyId: string,
+    at: Date,
+    line?: { quantity: number; unitPrice: Paisa; returned: boolean },
+  ) {
+    if (mongoMedicineIds.has(legacyId)) return;
+    let d = deletedMedicines.get(legacyId);
+    if (!d) {
+      d = { sold: 0, returned: 0, lastPrice: 0n, pricedAt: -Infinity, first: at, last: at };
+      deletedMedicines.set(legacyId, d);
+    }
+    if (at < d.first) d.first = at;
+    if (at > d.last) d.last = at;
+    if (!line) return;
+    if (line.returned) d.returned += line.quantity;
+    else d.sold += line.quantity;
+    if (at.getTime() >= d.pricedAt) {
+      d.pricedAt = at.getTime();
+      d.lastPrice = line.unitPrice;
+    }
   }
 
-  // Sales.
-  const mongoMedicineIds = new Set(src.medicines.map((m) => m.id));
+  /** Cashier deleted from Mongo (or never set) → their first sale or return. */
+  const missingCashiers = new Map<string, Date>();
+  function noteCashier(legacyId: string, at: Date) {
+    if (rejectedUsers.has(legacyId)) return false;
+    if (!userIds.has(legacyId)) {
+      const first = missingCashiers.get(legacyId);
+      if (!first || at < first) missingCashiers.set(legacyId, at);
+    }
+    return true;
+  }
+
+  // Purchases: the delivery history, and each batch's cost and quantity received.
+  const purchases: PlannedPurchase[] = [];
+  const purchasesByMedicine = new Map<string, LegacyPurchase[]>();
+  for (const doc of src.purchases) {
+    try {
+      const mapped = mapPurchase(doc, warnFor('purchases', doc.id));
+      if (rejectedMedicines.has(mapped.medicineLegacyId)) {
+        throw new Rejected('PURCHASE_MEDICINE_REJECTED', `medicine ${mapped.medicineLegacyId}`);
+      }
+      noteMedicine(mapped.medicineLegacyId, mapped.purchasedAt);
+      purchases.push({ ...mapped, legacyId: doc.id });
+      const list = purchasesByMedicine.get(mapped.medicineLegacyId) ?? [];
+      list.push(doc);
+      purchasesByMedicine.set(mapped.medicineLegacyId, list);
+    } catch (e) {
+      if (!(e instanceof Rejected)) throw e;
+      logReject('purchases', doc.id, e.reason, e.detail);
+    }
+  }
+
+  // Sales and returns (the old system kept both in "sales").
   const sales: (MappedSale & { legacyId: string; cashierLegacyId: string })[] = [];
+  const returns: PlannedReturn[] = [];
   let salesPaisa = 0n;
   let returnsPaisa = 0n;
   let returnCount = 0;
   let rawTotalPrice = 0;
   let rejectedSalesPaisa = 0n;
   let rejectedSaleCount = 0;
+  let rejectedReturnsPaisa = 0n;
+  let rejectedReturnCount = 0;
   let saleLines = 0;
-  const missingCashiers = new Set<string>();
-  /** Deleted medicine → its sold units, last unit price and sale times. */
-  const deletedMedicines = new Map<
-    string,
-    { sold: number; lastPrice: Paisa; first: Date; last: Date }
-  >();
+  let returnLines = 0;
 
   for (const doc of src.sales) {
-    saleLines += doc.items.length;
     if (typeof doc.totalPrice === 'number') rawTotalPrice += doc.totalPrice;
-    const isReturn = doc.isReturn === true || doc.isManualReturn === true;
     const total = typeof doc.totalPrice === 'number' ? legacyMoney(Math.abs(doc.totalPrice)) : null;
-    if (isReturn || (typeof doc.totalPrice === 'number' && doc.totalPrice < 0)) {
+
+    if (isLegacyReturn(doc)) {
       returnCount++;
+      returnLines += doc.items.length;
       returnsPaisa += total?.paisa ?? 0n;
-    } else {
-      salesPaisa += total?.paisa ?? 0n;
+      try {
+        const mapped = mapLegacyReturn(doc, warnFor('sales', doc.id));
+        for (const line of mapped.lines) {
+          if (rejectedMedicines.has(line.medicineLegacyId)) {
+            throw new Rejected('RETURN_MEDICINE_REJECTED', `medicine ${line.medicineLegacyId}`);
+          }
+        }
+        const cashier = doc.cashierId ?? NO_CASHIER;
+        if (!noteCashier(cashier, mapped.returnedAt)) {
+          throw new Rejected('RETURN_CASHIER_REJECTED', `user ${cashier}`);
+        }
+        for (const line of mapped.lines) {
+          noteMedicine(line.medicineLegacyId, mapped.returnedAt, { ...line, returned: true });
+        }
+        returns.push({ ...mapped, legacyId: doc.id, cashierLegacyId: cashier });
+      } catch (e) {
+        if (!(e instanceof Rejected)) throw e;
+        logReject('sales', doc.id, e.reason, e.detail);
+        rejectedReturnCount++;
+        rejectedReturnsPaisa += total?.paisa ?? 0n;
+      }
+      continue;
     }
+
+    saleLines += doc.items.length;
+    salesPaisa += total?.paisa ?? 0n;
     try {
       const mapped = mapSale(doc, warnFor('sales', doc.id));
       for (const line of mapped.lines) {
@@ -321,46 +413,28 @@ async function plan(src: Source, existingUsernames: Set<string>, existingEmails:
         }
       }
       const cashier = doc.cashierId ?? NO_CASHIER;
-      if (rejectedUsers.has(cashier))
+      if (!noteCashier(cashier, mapped.soldAt)) {
         throw new Rejected('SALE_CASHIER_REJECTED', `user ${cashier}`);
-      if (!userIds.has(cashier)) missingCashiers.add(cashier);
+      }
       for (const line of mapped.lines) {
-        if (mongoMedicineIds.has(line.medicineLegacyId)) continue;
-        const d = deletedMedicines.get(line.medicineLegacyId);
-        if (!d) {
-          deletedMedicines.set(line.medicineLegacyId, {
-            sold: line.quantity,
-            lastPrice: line.unitPrice,
-            first: mapped.soldAt,
-            last: mapped.soldAt,
-          });
-        } else {
-          d.sold += line.quantity;
-          if (mapped.soldAt >= d.last) {
-            d.last = mapped.soldAt;
-            d.lastPrice = line.unitPrice;
-          }
-        }
+        noteMedicine(line.medicineLegacyId, mapped.soldAt, { ...line, returned: false });
       }
       sales.push({ ...mapped, legacyId: doc.id, cashierLegacyId: cashier });
     } catch (e) {
       if (!(e instanceof Rejected)) throw e;
       logReject('sales', doc.id, e.reason, e.detail);
-      if (e.reason !== 'SALE_IS_LEGACY_RETURN') {
-        rejectedSaleCount++;
-        rejectedSalesPaisa += total?.paisa ?? 0n;
-      }
+      rejectedSaleCount++;
+      rejectedSalesPaisa += total?.paisa ?? 0n;
     }
   }
 
-  // Placeholder users for sales by cashiers deleted from Mongo.
-  for (const legacyId of missingCashiers) {
+  // Placeholder users for sales and returns by cashiers deleted from Mongo.
+  for (const [legacyId, firstSeen] of missingCashiers) {
     const none = legacyId === NO_CASHIER;
     const username = uniqueName(
       none ? 'legacy-unknown' : `legacy-user-${shortId(legacyId)}`,
       usernames,
     );
-    const firstSale = sales.find((s) => s.cashierLegacyId === legacyId)!.soldAt;
     users.push({
       legacyId,
       source: none ? 'sales.cashierId' : 'users',
@@ -373,17 +447,18 @@ async function plan(src: Source, existingUsernames: Set<string>, existingEmails:
       passwordHash: await bcrypt.hash(randomBytes(32).toString('hex'), config.BCRYPT_ROUNDS),
       role: RoleCode.CASHIER,
       active: false,
-      createdAt: firstSale,
+      createdAt: firstSeen,
     });
     logWarning(
       'users',
       legacyId,
       'PLACEHOLDER_USER',
-      `${username} for sales without a known cashier`,
+      `${username} for sales or returns without a known cashier`,
     );
   }
 
-  // Placeholder medicines for sales of medicines deleted from Mongo.
+  // Placeholder medicines for sales, returns and purchases of medicines
+  // deleted from Mongo. Their batch expired the day after it was last used.
   for (const [legacyId, d] of deletedMedicines) {
     medicines.set(legacyId, {
       legacyId,
@@ -398,33 +473,42 @@ async function plan(src: Source, existingUsernames: Set<string>, existingEmails:
       openingQuantity: 0,
       createdAt: d.first,
     });
-    logWarning('medicines', legacyId, 'PLACEHOLDER_MEDICINE', `${d.sold} units sold, name unknown`);
+    logWarning(
+      'medicines',
+      legacyId,
+      'PLACEHOLDER_MEDICINE',
+      `${d.sold} units sold, ${d.returned} returned, name unknown`,
+    );
   }
 
-  // Batches: one per medicine that ever had stock.
-  const soldByMedicine = new Map<string, number>();
-  for (const s of sales) {
-    for (const l of s.lines) {
-      soldByMedicine.set(
-        l.medicineLegacyId,
-        (soldByMedicine.get(l.medicineLegacyId) ?? 0) + l.quantity,
-      );
+  // Batches: one per medicine that ever had stock. Every medicine a loaded
+  // sale, return or purchase names has units there, so it gets one.
+  const unitsBy = (rows: { lines: { medicineLegacyId: string; quantity: number }[] }[]) => {
+    const units = new Map<string, number>();
+    for (const r of rows) {
+      for (const l of r.lines) {
+        units.set(l.medicineLegacyId, (units.get(l.medicineLegacyId) ?? 0) + l.quantity);
+      }
     }
-  }
+    return units;
+  };
+  const soldByMedicine = unitsBy(sales);
+  const returnedByMedicine = unitsBy(returns);
   const batches: PlannedBatch[] = [];
   for (const m of medicines.values()) {
-    const purchases = purchasesByMedicine.get(m.legacyId) ?? [];
-    const purchased = purchases.reduce((a, p) => a + (legacyCount(p.quantity) ?? 0), 0);
+    const delivered = purchasesByMedicine.get(m.legacyId) ?? [];
+    const purchased = delivered.reduce((a, p) => a + (legacyCount(p.quantity) ?? 0), 0);
     const received = quantityReceived(
       purchased,
       m.openingQuantity,
       soldByMedicine.get(m.legacyId) ?? 0,
+      returnedByMedicine.get(m.legacyId) ?? 0,
     );
     if (received === 0) {
       logWarning('medicines', m.legacyId, 'NO_BATCH', 'never stocked or sold: medicine only');
       continue;
     }
-    let cost = unitCostFromPurchases(purchases);
+    let cost = unitCostFromPurchases(delivered);
     if (cost === null) {
       cost = 0n;
       if (!m.placeholder)
@@ -444,8 +528,9 @@ async function plan(src: Source, existingUsernames: Set<string>, existingEmails:
   }
 
   const suppliers = new Map<string, string>();
-  for (const b of batches)
-    if (!suppliers.has(supplierKey(b.supplier))) suppliers.set(supplierKey(b.supplier), b.supplier);
+  for (const name of [...batches, ...purchases].map((r) => r.supplier)) {
+    if (!suppliers.has(supplierKey(name))) suppliers.set(supplierKey(name), name);
+  }
 
   const { numbers, lastPerDay } = assignReceiptNumbers(
     sales.map((s) => ({ key: s.legacyId, soldAt: s.soldAt })),
@@ -458,6 +543,8 @@ async function plan(src: Source, existingUsernames: Set<string>, existingEmails:
     medicines: [...medicines.values()],
     batches,
     sales: sales.map((s) => ({ ...s, receiptNumber: numbers.get(s.legacyId)! })),
+    purchases,
+    returns,
     receiptDays: lastPerDay,
     source: {
       counts: {
@@ -468,12 +555,15 @@ async function plan(src: Source, existingUsernames: Set<string>, existingEmails:
         billsequences: src.billSequenceDays,
       },
       saleLines,
+      returnLines,
       salesPaisa,
       returnsPaisa,
       returnCount,
       rawTotalPrice,
       rejectedSalesPaisa,
       rejectedSaleCount,
+      rejectedReturnsPaisa,
+      rejectedReturnCount,
       stockByMedicine: new Map(
         src.medicines.map((m) => [
           m.id,
@@ -764,6 +854,73 @@ async function load(p: Plan, ids: IdMap, runBatch: RunBatch, actorName: string |
   }
   console.log();
 
+  // Delivery history: no stock movements, the opening stock already includes it.
+  const purchaseRows = p.purchases.map((x) => ({
+    x,
+    ...idOf('purchases', x.legacyId, 'LegacyPurchase'),
+  }));
+  const newPurchases = purchaseRows.filter((r) => r.isNew);
+  done = 0;
+  for (const chunk of chunks(newPurchases)) {
+    await writeBatch(
+      'LegacyPurchase',
+      chunk.map((r) => ({ source: 'purchases', legacyId: r.x.legacyId, newId: r.id })),
+      (tx) =>
+        tx.legacyPurchase
+          .createMany({
+            data: chunk.map(({ x, id }) => ({
+              id,
+              batchId: batchIdOf.get(x.medicineLegacyId)!,
+              supplierId: supplierIdOf.get(supplierKey(x.supplier))!,
+              quantity: x.quantity,
+              totalCost: x.totalCost === null ? null : money(x.totalCost),
+              purchasedAt: x.purchasedAt,
+              createdAt: x.purchasedAt,
+            })),
+          })
+          .then(() => undefined),
+    );
+    progress('purchases (history)', (done += chunk.length), newPurchases.length);
+  }
+  console.log();
+
+  // Returns: history only, against the batch each line names.
+  const returnRows = p.returns.map((r) => ({ r, ...idOf('sales', r.legacyId, 'LegacyReturn') }));
+  const newReturns = returnRows.filter((r) => r.isNew);
+  done = 0;
+  for (const chunk of chunks(newReturns)) {
+    await writeBatch(
+      'LegacyReturn',
+      chunk.map((row) => ({ source: 'sales', legacyId: row.r.legacyId, newId: row.id })),
+      async (tx) => {
+        await tx.legacyReturn.createMany({
+          data: chunk.map(({ r, id }) => ({
+            id,
+            cashierId: userIdOf.get(r.cashierLegacyId)!,
+            refundTotal: money(r.refundTotal),
+            returnedAt: r.returnedAt,
+            createdAt: r.returnedAt,
+          })),
+        });
+        await tx.legacyReturnItem.createMany({
+          data: chunk.flatMap(({ r, id }) =>
+            r.lines.map((l, i) => ({
+              legacyReturnId: id,
+              lineNo: i + 1,
+              batchId: batchIdOf.get(l.medicineLegacyId)!,
+              quantity: l.quantity,
+              unitPrice: money(l.unitPrice),
+              discount: money(l.discount),
+              lineTotal: money(l.lineTotal),
+            })),
+          ),
+        });
+      },
+    );
+    progress('returns (history)', (done += chunk.length), newReturns.length);
+  }
+  console.log();
+
   // Receipt counters, so new sales on a migrated day continue its series.
   await runBatch(async (tx) => {
     for (const [day, last] of p.receiptDays) {
@@ -786,9 +943,27 @@ const pkr = (p: Paisa) => {
 
 async function verify(db: Tx | PrismaClient, p: Plan): Promise<string[]> {
   const count = async (entity: string) => db.legacyIdMap.count({ where: { entity } });
-  const [users, medicines, batches, sales] = await Promise.all(
-    ['User', 'Medicine', 'Batch', 'Sale'].map(count),
+  const [users, medicines, batches, sales, purchases, returns] = await Promise.all(
+    ['User', 'Medicine', 'Batch', 'Sale', 'LegacyPurchase', 'LegacyReturn'].map(count),
   );
+  // The target was empty, so every legacy history row came from this script.
+  const [history] = await db.$queryRaw<
+    {
+      returnLines: bigint;
+      returnUnits: bigint | null;
+      refunded: Prisma.Decimal | null;
+      returnLineTotal: Prisma.Decimal | null;
+      purchasedUnits: bigint | null;
+      priced: bigint;
+    }[]
+  >`
+    SELECT
+      (SELECT COUNT(*) FROM "LegacyReturnItem") AS "returnLines",
+      (SELECT SUM("quantity") FROM "LegacyReturnItem") AS "returnUnits",
+      (SELECT SUM("refundTotal") FROM "LegacyReturn") AS "refunded",
+      (SELECT SUM("lineTotal") FROM "LegacyReturnItem") AS "returnLineTotal",
+      (SELECT SUM("quantity") FROM "LegacyPurchase") AS "purchasedUnits",
+      (SELECT COUNT(*) FROM "LegacyPurchase" WHERE "totalCost" IS NOT NULL) AS "priced"`;
   const [totals] = await db.$queryRaw<
     {
       lines: bigint;
@@ -814,8 +989,11 @@ async function verify(db: Tx | PrismaClient, p: Plan): Promise<string[]> {
     WHERE l."source" = 'medicines' AND l."entity" = 'Medicine'
     GROUP BY l."legacyId", m."name"`;
 
-  const loadedPaisa = totals?.grand ? BigInt(totals.grand.mul(100).toFixed(0)) : 0n;
-  const paidPaisa = totals?.paid ? BigInt(totals.paid.mul(100).toFixed(0)) : 0n;
+  const paisaOf = (d: Prisma.Decimal | null | undefined) =>
+    d ? BigInt(d.mul(100).toFixed(0)) : 0n;
+  const loadedPaisa = paisaOf(totals?.grand);
+  const paidPaisa = paisaOf(totals?.paid);
+  const refundedPaisa = paisaOf(history?.refunded);
   const s = p.source;
   const placeholderMeds = p.medicines.filter((m) => m.placeholder).length;
   const placeholderUsers = p.users.filter((u) => !u.active).length;
@@ -844,6 +1022,9 @@ async function verify(db: Tx | PrismaClient, p: Plan): Promise<string[]> {
 
   const check = (ok: boolean) => (ok ? '✓' : '✖');
   const salesBalance = loadedPaisa + s.rejectedSalesPaisa === s.salesPaisa;
+  const returnsBalance = refundedPaisa + s.rejectedReturnsPaisa === s.returnsPaisa;
+  const purchasesBalance = purchases! + rejected('purchases') === s.counts.purchases;
+  const returnLinesOver = paisaOf(history?.returnLineTotal) - refundedPaisa;
   const row = (label: string, mongo: string, pgv: string, note = '') =>
     `  ${label.padEnd(18)}${mongo.padStart(12)}${pgv.padStart(12)}   ${note}`;
 
@@ -867,14 +1048,14 @@ async function verify(db: Tx | PrismaClient, p: Plan): Promise<string[]> {
     row(
       'purchases',
       fmt(s.counts.purchases!),
-      '—',
-      `used for cost only; ${rejected('purchases')} point at deleted medicines`,
+      fmt(purchases!),
+      `history only, no stock movements; ${fmt(Number(history?.priced ?? 0))} with a price; ${rejected('purchases')} rejected`,
     ),
     row(
       'sales',
-      fmt(s.counts.sales!),
+      fmt(s.counts.sales! - s.returnCount),
       fmt(sales!),
-      `${s.returnCount} returns not loaded; ${s.rejectedSaleCount} other rejects`,
+      `"sales" documents that aren't returns; ${s.rejectedSaleCount} rejected`,
     ),
     row(
       'sale lines',
@@ -882,17 +1063,41 @@ async function verify(db: Tx | PrismaClient, p: Plan): Promise<string[]> {
       fmt(Number(totals?.lines ?? 0)),
       `${fmt(Number(totals?.units ?? 0))} units`,
     ),
+    row(
+      'returns',
+      fmt(s.returnCount),
+      fmt(returns!),
+      `negative "sales": history only, not in reports; ${s.rejectedReturnCount} rejected`,
+    ),
+    row(
+      'return lines',
+      fmt(s.returnLines),
+      fmt(Number(history?.returnLines ?? 0)),
+      `${fmt(Number(history?.returnUnits ?? 0))} units`,
+    ),
     row('payments', '—', fmt(Number(totals?.payments ?? 0)), 'one CASH payment per sale'),
     row('billsequences', fmt(s.counts.billsequences!), '—', 'not copied; receipt counters rebuilt'),
     '',
     'Sales amount (PKR)',
     `  Mongo Σ totalPrice, all documents     ${pkr(s.salesPaisa - s.returnsPaisa).padStart(16)}   (raw float sum ${s.rawTotalPrice})`,
-    `  − returns (negative "sales")          ${pkr(-s.returnsPaisa).padStart(16)}   ${s.returnCount} documents, not loaded`,
+    `  − returns (negative "sales")          ${pkr(-s.returnsPaisa).padStart(16)}   ${s.returnCount} documents, checked below`,
     `  = Mongo sales                         ${pkr(s.salesPaisa).padStart(16)}`,
     `  Postgres Σ Sale.grandTotal            ${pkr(loadedPaisa).padStart(16)}`,
     `  + rejected sales                      ${pkr(s.rejectedSalesPaisa).padStart(16)}   ${s.rejectedSaleCount} documents`,
     `  ${check(salesBalance)} loaded + rejected = Mongo sales   ${salesBalance ? '' : `(off by ${pkr(s.salesPaisa - loadedPaisa - s.rejectedSalesPaisa)})`}`,
     `  ${check(paidPaisa === loadedPaisa)} payments = sale totals (${pkr(paidPaisa)})`,
+    '',
+    'Returns amount (PKR), history only',
+    `  Mongo returns                         ${pkr(s.returnsPaisa).padStart(16)}`,
+    `  Postgres Σ LegacyReturn.refundTotal   ${pkr(refundedPaisa).padStart(16)}`,
+    `  + rejected returns                    ${pkr(s.rejectedReturnsPaisa).padStart(16)}   ${s.rejectedReturnCount} documents`,
+    `  ${check(returnsBalance)} loaded + rejected = Mongo returns   ${returnsBalance ? '' : `(off by ${pkr(s.returnsPaisa - refundedPaisa - s.rejectedReturnsPaisa)})`}`,
+    returnLinesOver === 0n
+      ? `  ✓ return lines add up to the refunds`
+      : `  ! return lines are ${pkr(returnLinesOver)} above the refunds (refunds above their lines: warnings.jsonl, RETURN_TOTAL_ABOVE_LINES)`,
+    '',
+    'Purchases (delivery history)',
+    `  ${check(purchasesBalance)} loaded ${fmt(purchases!)} + rejected ${fmt(rejected('purchases'))} = Mongo ${fmt(s.counts.purchases!)}; ${fmt(Number(history?.purchasedUnits ?? 0))} units`,
     '',
     'Stock per medicine (full list: stock-per-medicine.csv)',
     `  ${check(mismatches.length === 0)} ${matched} of ${s.stockByMedicine.size} medicines match; total units Mongo ${fmt(mongoUnits)}, Postgres ${fmt(pgUnits)}`,

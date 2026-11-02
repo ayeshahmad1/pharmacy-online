@@ -483,25 +483,27 @@ not a backup.
 
 ## Migrating from the old MongoDB system
 
-`pnpm --filter api migrate:mongo` copies the old system's users, medicines, stock and sales into
-Postgres. It only reads from Mongo. It is a **dry run by default**: everything is written inside one
+`pnpm --filter api migrate:mongo` copies the old system's users, medicines, stock, sales, returns
+and purchases into Postgres. It only reads from Mongo. It is a **dry run by default**: everything is written inside one
 transaction, checked against the database's constraints, totalled, and rolled back.
 
 **What is loaded and how** (decided in Session 13):
 
-| Mongo                       | Postgres                                                                                                                                                                        |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `users`                     | `User`. Passwords are kept (bcrypt); username = the part of the email before `@`. Roles admin/cashier                                                                           |
-| `medicines` (one per batch) | `Medicine` (category "Uncategorised", unit = `type`) + one `Batch`; the Mongo quantity is an opening-stock `ADJUSTMENT`                                                         |
-| `purchases`                 | Not rows: they give each batch its cost (latest priced delivery ÷ quantity; 0 when unknown, listed)                                                                             |
-| `sales`                     | `Sale` + `SaleItem` + one `CASH` `Payment`, with no stock movements (the opening stock already reflects them). New `S-YYYYMMDD-NNNN` numbers; the old bill number is in `notes` |
-| `sales` with `isReturn`     | Not loaded (they name no original sale); logged, and their total is shown in the comparison                                                                                     |
-| `billsequences`             | Not copied; receipt counters are rebuilt from the sales                                                                                                                         |
+| Mongo                       | Postgres                                                                                                                                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`                     | `User`. Passwords are kept (bcrypt); username = the part of the email before `@`. Roles admin/cashier                                                                                                      |
+| `medicines` (one per batch) | `Medicine` (category "Uncategorised", unit = `type`) + one `Batch`; the Mongo quantity is an opening-stock `ADJUSTMENT`                                                                                    |
+| `purchases`                 | `LegacyPurchase` delivery history (batch, supplier, quantity, total paid or none), with no stock movements. They also give each batch its cost (latest priced delivery ÷ quantity; 0 when unknown, listed) |
+| `sales`                     | `Sale` + `SaleItem` + one `CASH` `Payment`, with no stock movements (the opening stock already reflects them). New `S-YYYYMMDD-NNNN` numbers; the old bill number is in `notes`                            |
+| `sales` with `isReturn`     | `LegacyReturn` + lines against the batch each names. They name no original sale, so they are history only: no stock movements, and **no report or cash closing counts them**                               |
+| `billsequences`             | Not copied; receipt counters are rebuilt from the sales                                                                                                                                                    |
 
-Sales of medicines or by users deleted from Mongo get inactive placeholders ("Deleted item #abc123
-(old system)", `legacy-user-abc123`), so no sale is lost. Each loaded row is recorded in `LegacyIdMap`
-with its Mongo `_id`. Suppliers that are only numbers ("00") or "Return"/"Discount" become
-"Unknown supplier".
+Sales, returns and purchases of medicines or by users deleted from Mongo get inactive placeholders
+("Deleted item #abc123 (old system)", `legacy-user-abc123`), so nothing is lost. Each loaded row is
+recorded in `LegacyIdMap` with its Mongo `_id`. Suppliers that are only numbers ("00") or
+"Return"/"Discount" become "Unknown supplier". Old returns and deliveries are shown read-only to
+admins and pharmacists under **Old system records**, and each medicine's page lists its old
+deliveries.
 
 **Run it:**
 
@@ -517,8 +519,8 @@ with its Mongo `_id`. Suppliers that are only numbers ("00") or "Return"/"Discou
    ```bash
    DATABASE_URL="postgresql://pharmacy:pharmacy_dev@localhost:5433/pharmacy_pos_migration?schema=public" pnpm --filter api migrate:mongo
    ```
-   It must show `loaded + rejected = Mongo sales` and every medicine's stock matching. Fix anything
-   rejected in the old system and run again.
+   It must show `loaded + rejected` matching Mongo for sales, returns and purchases, and every
+   medicine's stock matching. Fix anything rejected in the old system and run again.
 4. **Cut-over:** stop selling in the old system (receipt numbers and opening stock are taken from
    the data as it is at that moment), run the dry run once more, then the same command with
    `--commit`. Commit mode writes one transaction per batch of 500 (`--batch-size`); if it stops

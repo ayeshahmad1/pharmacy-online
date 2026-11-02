@@ -44,6 +44,9 @@ export type LegacyPurchase = {
   /** Total paid for the whole delivery, not per unit. 0 when not entered. */
   purchasePrice?: unknown;
   purchaseDate?: unknown;
+  supplier?: unknown;
+  /** Always 0 in the data we have; anything else is reported, not applied. */
+  discount?: unknown;
 };
 
 export type LegacySaleItem = {
@@ -79,6 +82,17 @@ export type RejectReason =
   | 'MEDICINE_BAD_QUANTITY'
   | 'MEDICINE_BAD_EXPIRY_DATE'
   | 'PURCHASE_MEDICINE_MISSING'
+  | 'PURCHASE_MEDICINE_REJECTED'
+  | 'PURCHASE_BAD_QUANTITY'
+  | 'PURCHASE_BAD_PRICE'
+  | 'PURCHASE_BAD_DATE'
+  | 'RETURN_BAD_DATE'
+  | 'RETURN_NO_ITEMS'
+  | 'RETURN_BAD_QUANTITY'
+  | 'RETURN_BAD_PRICE'
+  | 'RETURN_BAD_TOTAL'
+  | 'RETURN_MEDICINE_REJECTED'
+  | 'RETURN_CASHIER_REJECTED'
   | 'SALE_IS_LEGACY_RETURN'
   | 'SALE_BAD_DATE'
   | 'SALE_NO_ITEMS'
@@ -295,10 +309,54 @@ export function unitCostFromPurchases(purchases: LegacyPurchase[]): Paisa | null
 /**
  * Batch.quantityReceived is informational and must be positive. Use the
  * largest figure we know arrived: recorded purchases, what's on the shelf,
- * or what was sold. 0 means nothing ever arrived, so no batch is created.
+ * what was sold or what came back. 0 means nothing ever arrived, so no batch
+ * is created.
  */
-export const quantityReceived = (purchased: number, onHand: number, sold: number) =>
-  Math.max(purchased, onHand, sold);
+export const quantityReceived = (...known: number[]) => Math.max(0, ...known);
+
+// ─── Purchases (delivery history) ───────────────────────────────────────────
+
+export type MappedPurchase = {
+  medicineLegacyId: string;
+  quantity: number;
+  /** Null when the old system recorded 0, i.e. no price was entered. */
+  totalCost: Paisa | null;
+  purchasedAt: Date;
+  supplier: string;
+};
+
+/**
+ * One old delivery, kept as history only: the batch's opening stock already
+ * includes it, so it gets no stock movement.
+ */
+export function mapPurchase(doc: LegacyPurchase, warn: Warn): MappedPurchase {
+  if (!doc.medicineId) throw new Rejected('PURCHASE_MEDICINE_MISSING', 'no medicineId');
+  const quantity = legacyCount(doc.quantity);
+  if (quantity === null) {
+    throw new Rejected('PURCHASE_BAD_QUANTITY', `quantity ${String(doc.quantity)}`);
+  }
+  if (!validDate(doc.purchaseDate)) throw new Rejected('PURCHASE_BAD_DATE');
+  const price = legacyMoney(doc.purchasePrice);
+  if (!price) {
+    throw new Rejected('PURCHASE_BAD_PRICE', `purchasePrice ${String(doc.purchasePrice)}`);
+  }
+  if (price.rounded) {
+    warn(
+      'PRICE_ROUNDED',
+      `purchasePrice ${String(doc.purchasePrice)} → ${formatPaisa(price.paisa)}`,
+    );
+  }
+  if (typeof doc.discount === 'number' && doc.discount !== 0) {
+    warn('PURCHASE_DISCOUNT_IGNORED', `discount ${doc.discount}`);
+  }
+  return {
+    medicineLegacyId: doc.medicineId,
+    quantity,
+    totalCost: price.paisa === 0n ? null : price.paisa,
+    purchasedAt: doc.purchaseDate,
+    supplier: supplierName(doc.supplier),
+  };
+}
 
 /** Placeholder batches for deleted medicines expire the day after their last sale. */
 export const placeholderExpiry = (lastSoldDay: string) => addDays(lastSoldDay, 1);
@@ -322,7 +380,8 @@ export type MappedSale = {
   notes: string;
 };
 
-const isLegacyReturn = (doc: LegacySale) =>
+/** The old system stored a return as a "sale" with a negative total. */
+export const isLegacyReturn = (doc: LegacySale) =>
   doc.isReturn === true ||
   doc.isManualReturn === true ||
   (typeof doc.totalPrice === 'number' && doc.totalPrice < 0);
@@ -391,6 +450,65 @@ export function mapSale(doc: LegacySale, warn: Warn): MappedSale {
     notes: billNumber
       ? `Migrated from the old system, bill ${billNumber}`
       : 'Migrated from the old system (no bill number)',
+  };
+}
+
+// ─── Returns (history only) ─────────────────────────────────────────────────
+
+export type MappedReturn = {
+  returnedAt: Date;
+  /** What was paid back: the negative total, made positive. */
+  refundTotal: Paisa;
+  lines: MappedSaleLine[];
+};
+
+/**
+ * One legacy return. It names no original sale, so it is kept as history:
+ * lines and quantities are positive in the document, the total negative. A
+ * refund below the lines' value is spread over them by value, like a sale's
+ * bill discount. A refund above it can't be spread, so the lines keep their
+ * full value and the runner is warned.
+ */
+export function mapLegacyReturn(doc: LegacySale, warn: Warn): MappedReturn {
+  if (!validDate(doc.createdAt)) throw new Rejected('RETURN_BAD_DATE');
+  if (doc.items.length === 0) throw new Rejected('RETURN_NO_ITEMS');
+
+  const lines = doc.items.map((item, index) => {
+    const quantity = legacyCount(item.quantity);
+    if (quantity === null || !item.medicineId) {
+      throw new Rejected('RETURN_BAD_QUANTITY', `line ${index + 1}: ${String(item.quantity)}`);
+    }
+    const rawPrice = item.originalPrice ?? item.price;
+    const price = legacyMoney(rawPrice);
+    if (!price) throw new Rejected('RETURN_BAD_PRICE', `line ${index + 1}: ${String(rawPrice)}`);
+    if (price.rounded) {
+      warn('PRICE_ROUNDED', `line ${index + 1}: ${String(rawPrice)} → ${formatPaisa(price.paisa)}`);
+    }
+    return { medicineLegacyId: item.medicineId, quantity, unitPrice: price.paisa };
+  });
+
+  const total = typeof doc.totalPrice === 'number' ? legacyMoney(Math.abs(doc.totalPrice)) : null;
+  if (!total) throw new Rejected('RETURN_BAD_TOTAL', `total ${String(doc.totalPrice)}`);
+  const values = lines.map((l) => BigInt(l.quantity) * l.unitPrice);
+  const value = sumPaisa(values);
+  let discounts = values.map(() => 0n);
+  if (total.paisa > value) {
+    warn(
+      'RETURN_TOTAL_ABOVE_LINES',
+      `refund ${formatPaisa(total.paisa)} > lines ${formatPaisa(value)}`,
+    );
+  } else {
+    discounts = allocate(value - total.paisa, values);
+  }
+
+  return {
+    returnedAt: doc.createdAt,
+    refundTotal: total.paisa,
+    lines: lines.map((l, i) => ({
+      ...l,
+      discount: discounts[i]!,
+      lineTotal: values[i]! - discounts[i]!,
+    })),
   };
 }
 

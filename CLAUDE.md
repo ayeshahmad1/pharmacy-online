@@ -68,7 +68,7 @@ packages/shared/src/ (zod schemas, types, constants)
 
 15. **Migration from the old MongoDB system** (decided in Session 13), `src/migration/mongo/`:
     - The old purchase/sale history doesn't add up to its stock, so each batch's Mongo quantity is loaded as one opening `ADJUSTMENT` movement, and legacy sales are loaded as history (sale, lines, one CASH payment) **without** stock movements.
-    - Legacy returns (negative "sales" with no original sale) are not loaded; they are logged and their total shown. Sales of medicines/users deleted from Mongo get inactive placeholders. Batch cost = latest priced purchase ÷ quantity, else 0 (listed).
+    - Legacy returns (negative "sales" with no original sale) are loaded as `LegacyReturn` + lines against the batch each names: history only, **no** stock movements and **left out of every report, the dashboard and cash closing** (decided after Session 13). Legacy purchases are loaded as `LegacyPurchase` delivery history (batch, supplier, quantity, total paid or null), also without stock movements. Both are read-only (ADMIN/PHARMACIST, `/api/legacy/*`, the "Old system records" screen and each medicine's page). Sales, returns and purchases of medicines/users deleted from Mongo get inactive placeholders. Batch cost = latest priced purchase ÷ quantity, else 0 (listed).
     - Dry run by default (one transaction, rolled back after the verification totals); `--commit` writes per batch and resumes via `LegacyIdMap`. Rejected documents are logged to `rejects.jsonl`, never dropped silently. Only into an empty database.
 
 ## Architecture rules

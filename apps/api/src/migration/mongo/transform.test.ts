@@ -4,9 +4,12 @@ import {
   Rejected,
   UNKNOWN_SUPPLIER,
   assignReceiptNumbers,
+  isLegacyReturn,
   legacyExpiryDate,
   legacyMoney,
+  mapLegacyReturn,
   mapMedicine,
+  mapPurchase,
   mapSale,
   mapUser,
   quantityReceived,
@@ -14,6 +17,7 @@ import {
   uniqueName,
   unitCostFromPurchases,
   type LegacyMedicine,
+  type LegacyPurchase,
   type LegacySale,
 } from './transform';
 
@@ -217,9 +221,132 @@ describe('unitCostFromPurchases', () => {
 });
 
 describe('quantityReceived', () => {
-  it('takes the largest of purchased, on hand and sold', () => {
+  it('takes the largest of purchased, on hand, sold and returned', () => {
     expect(quantityReceived(400, 654, 2305)).toBe(2305);
+    expect(quantityReceived(0, 0, 0, 3)).toBe(3);
     expect(quantityReceived(0, 0, 0)).toBe(0);
+  });
+});
+
+describe('mapPurchase', () => {
+  const purchase = (over: Partial<LegacyPurchase>): LegacyPurchase => ({
+    id: 'p1',
+    medicineId: 'm1',
+    quantity: 300,
+    purchasePrice: 3550,
+    purchaseDate: new Date('2026-05-01T10:00:00Z'),
+    supplier: ' AL Qamar ',
+    discount: 0,
+    ...over,
+  });
+
+  it('keeps the delivery as history with its supplier and total', () => {
+    const warn = vi.fn();
+    const mapped = mapPurchase(purchase({}), warn);
+    expect(mapped).toMatchObject({
+      medicineLegacyId: 'm1',
+      quantity: 300,
+      purchasedAt: new Date('2026-05-01T10:00:00Z'),
+      supplier: 'AL Qamar',
+    });
+    expect(formatPaisa(mapped.totalCost!)).toBe('3550.00');
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('has no cost when the price was left at 0, and an unknown supplier for "00"', () => {
+    expect(mapPurchase(purchase({ purchasePrice: 0, supplier: '00' }), vi.fn())).toMatchObject({
+      totalCost: null,
+      supplier: UNKNOWN_SUPPLIER,
+    });
+  });
+
+  it('reports a discount it does not apply', () => {
+    const warn = vi.fn();
+    mapPurchase(purchase({ discount: 50 }), warn);
+    expect(warn).toHaveBeenCalledWith('PURCHASE_DISCOUNT_IGNORED', 'discount 50');
+  });
+
+  it('rejects missing medicines, bad quantities, prices and dates', () => {
+    const r = (over: Partial<LegacyPurchase>) =>
+      rejection(() => mapPurchase(purchase(over), vi.fn()));
+    expect(r({ medicineId: null })).toBe('PURCHASE_MEDICINE_MISSING');
+    expect(r({ quantity: 0 })).toBe('PURCHASE_BAD_QUANTITY');
+    expect(r({ quantity: 2.5 })).toBe('PURCHASE_BAD_QUANTITY');
+    expect(r({ purchasePrice: -1 })).toBe('PURCHASE_BAD_PRICE');
+    expect(r({ purchaseDate: 'last week' })).toBe('PURCHASE_BAD_DATE');
+  });
+});
+
+describe('mapLegacyReturn', () => {
+  const ret = (over: Partial<LegacySale>): LegacySale => ({
+    id: 'r1',
+    cashierId: 'u1',
+    createdAt: new Date('2026-04-07T15:03:56Z'),
+    isReturn: true,
+    isManualReturn: true,
+    items: [
+      { medicineId: 'a', quantity: 13, originalPrice: 455 },
+      { medicineId: 'b', quantity: 4, originalPrice: 306 },
+    ],
+    totalPrice: -7139,
+    ...over,
+  });
+
+  it('recognises returns by their flags or a negative total', () => {
+    expect(isLegacyReturn(ret({}))).toBe(true);
+    expect(isLegacyReturn(ret({ isReturn: false, isManualReturn: false }))).toBe(true);
+    expect(isLegacyReturn(ret({ isReturn: false, isManualReturn: false, totalPrice: 10 }))).toBe(
+      false,
+    );
+  });
+
+  it('keeps the lines at full value when they add up to the refund', () => {
+    const warn = vi.fn();
+    const mapped = mapLegacyReturn(ret({}), warn);
+    expect(formatPaisa(mapped.refundTotal)).toBe('7139.00');
+    expect(mapped.returnedAt).toEqual(new Date('2026-04-07T15:03:56Z'));
+    expect(
+      mapped.lines.map((l) => [l.medicineLegacyId, l.quantity, formatPaisa(l.lineTotal)]),
+    ).toEqual([
+      ['a', 13, '5915.00'],
+      ['b', 4, '1224.00'],
+    ]);
+    expect(mapped.lines.every((l) => l.discount === 0n)).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('spreads a refund below the lines over them by value', () => {
+    const mapped = mapLegacyReturn(
+      ret({
+        items: [
+          { medicineId: 'a', quantity: 1, price: 100 },
+          { medicineId: 'b', quantity: 2, price: 150 },
+        ],
+        totalPrice: -360,
+      }),
+      vi.fn(),
+    );
+    expect(mapped.lines.map((l) => formatPaisa(l.discount))).toEqual(['10.00', '30.00']);
+    expect(mapped.lines.map((l) => formatPaisa(l.lineTotal))).toEqual(['90.00', '270.00']);
+  });
+
+  it('keeps full lines and warns when the refund is above them', () => {
+    const warn = vi.fn();
+    const mapped = mapLegacyReturn(ret({ totalPrice: -7200 }), warn);
+    expect(formatPaisa(mapped.refundTotal)).toBe('7200.00');
+    expect(mapped.lines.every((l) => l.discount === 0n)).toBe(true);
+    expect(warn).toHaveBeenCalledWith('RETURN_TOTAL_ABOVE_LINES', expect.any(String));
+  });
+
+  it('rejects bad dates, lines and totals', () => {
+    const item = { medicineId: 'a', quantity: 1, price: 100 };
+    const r = (over: Partial<LegacySale>) => rejection(() => mapLegacyReturn(ret(over), vi.fn()));
+    expect(r({ createdAt: 'yesterday' })).toBe('RETURN_BAD_DATE');
+    expect(r({ items: [] })).toBe('RETURN_NO_ITEMS');
+    expect(r({ items: [{ ...item, quantity: 0 }] })).toBe('RETURN_BAD_QUANTITY');
+    expect(r({ items: [{ ...item, medicineId: null }] })).toBe('RETURN_BAD_QUANTITY');
+    expect(r({ items: [{ ...item, price: undefined }] })).toBe('RETURN_BAD_PRICE');
+    expect(r({ items: [item], totalPrice: 'minus 100' })).toBe('RETURN_BAD_TOTAL');
   });
 });
 
