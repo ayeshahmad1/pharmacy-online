@@ -4,6 +4,9 @@ import {
   MAX_LINE_QUANTITY,
   addToCart,
   cartUnits,
+  discountAllowed,
+  discountCap,
+  discountLimitError,
   newCart,
   parseDiscount,
   parseScan,
@@ -186,6 +189,61 @@ describe('toSaleBody', () => {
     const a = medicine();
     const { customerName: _gone, ...old } = cartWith([a, 1]);
     expect(toSaleBody(old, []).customerName).toBeUndefined();
+  });
+});
+
+describe('cashier discount limit', () => {
+  // Rs 200 subtotal: a 10% limit is Rs 20 of discounts in total.
+  const a = medicine({ sellingPrice: '50.00' });
+  const b = medicine({ sellingPrice: '100.00' });
+  const bill = () => cartWith([a, 2], [b, 1]);
+  const pct = (value: string) => ({ type: 'PERCENT' as const, value });
+  const rs = (value: string) => ({ type: 'AMOUNT' as const, value });
+
+  it('rounds the cap the way the API does', () => {
+    expect(discountCap(20_000n, 10)).toBe(2_000n);
+    expect(discountCap(333n, 10)).toBe(33n);
+    expect(discountCap(335n, 10)).toBe(34n);
+  });
+
+  it('allows a bill discount up to the limit and refuses anything above it', () => {
+    expect(discountAllowed(bill(), null, pct('10'), 10)).toBe(true);
+    expect(discountAllowed(bill(), null, rs('20'), 10)).toBe(true);
+    expect(discountAllowed(bill(), null, pct('10.5'), 10)).toBe(false);
+    expect(discountAllowed(bill(), null, rs('20.01'), 10)).toBe(false);
+    expect(discountAllowed(bill(), null, null, 10)).toBe(true);
+  });
+
+  it('counts line and bill discounts together against the whole bill', () => {
+    // 20% off one Rs 50 line is Rs 20: allowed, as it is 10% of the bill.
+    expect(discountAllowed(bill(), b.id, pct('20'), 10)).toBe(true);
+    const withLine = setLineDiscount(bill(), a.id, rs('15'));
+    // Rs 15 already given: a bill discount may add at most Rs 5 more...
+    expect(discountAllowed(withLine, null, rs('5'), 10)).toBe(true);
+    expect(discountAllowed(withLine, null, rs('5.01'), 10)).toBe(false);
+    // ...and another line's discount likewise.
+    expect(discountAllowed(withLine, b.id, rs('5'), 10)).toBe(true);
+    expect(discountAllowed(withLine, b.id, rs('6'), 10)).toBe(false);
+    // Changing the same line's own discount replaces it rather than adding.
+    expect(discountAllowed(withLine, a.id, rs('20'), 10)).toBe(true);
+  });
+
+  it('lets an over-limit bill be brought down, never pushed further', () => {
+    // Rs 20 off the bill, then the Rs 100 line goes: Rs 20 is now 20% of Rs 100.
+    const over = removeLine({ ...bill(), discount: rs('20') }, b.id);
+    expect(discountLimitError(priceCart(over), 10)).toBe(
+      'Cashiers can give at most 10% discount (Rs 10.00 on this bill); ask a pharmacist',
+    );
+    expect(discountAllowed(over, null, rs('15'), 10)).toBe(true);
+    expect(discountAllowed(over, null, rs('25'), 10)).toBe(false);
+    expect(discountAllowed(over, a.id, rs('1'), 10)).toBe(false);
+  });
+
+  it('has no limit for staff', () => {
+    const generous = { ...bill(), discount: pct('50') };
+    expect(discountLimitError(priceCart(generous), null)).toBeNull();
+    expect(discountLimitError(priceCart(generous), 10)).not.toBeNull();
+    expect(discountLimitError(priceCart(bill()), 10)).toBeNull();
   });
 });
 

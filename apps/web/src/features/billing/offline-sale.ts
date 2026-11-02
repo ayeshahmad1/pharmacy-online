@@ -16,10 +16,10 @@ import type {
   SellableMedicineDto,
   UserDto,
 } from '@pharmacy/shared';
-import { allocate, paisaToAmount, percentOf, sumPaisa, toPaisa } from '@/lib/money';
+import { allocate, paisaToAmount, sumPaisa, toPaisa } from '@/lib/money';
 import { predictFefo } from '@/offline/catalogue';
 import { offlineRef } from '@/offline/sale-queue';
-import { toSaleBody, type Cart, type CartTotals } from './cart';
+import { discountLimitError, toSaleBody, type Cart, type CartTotals } from './cart';
 import { shortageMessage, type SaleProblem } from './sale-errors';
 
 const emptyProblem = (message: string): SaleProblem => ({
@@ -84,12 +84,8 @@ export function checkOfflineSale(
   }
 
   if (check.role === 'CASHIER') {
-    const maxPercent = check.cashierMaxDiscountPercent;
-    const cap = percentOf(totals.subtotal, String(maxPercent));
-    if (totals.discountTotal > cap) {
-      const message = `Cashiers can give at most ${maxPercent}% discount (Rs ${paisaToAmount(cap)} on this bill); ask a pharmacist`;
-      return { ...emptyProblem(message), billDiscount: message };
-    }
+    const message = discountLimitError(totals, check.cashierMaxDiscountPercent);
+    if (message) return { ...emptyProblem(message), billDiscount: message };
   }
   return null;
 }

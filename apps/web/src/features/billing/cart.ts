@@ -175,6 +175,50 @@ export function applyDiscount(
 export const lineGross = (line: CartLine) =>
   (toPaisa(line.medicine.sellingPrice) ?? 0n) * BigInt(line.quantity);
 
+/** The cart with one discount changed: a line's (by medicine id) or, for null, the bill's. */
+export function withDiscount(
+  cart: Cart,
+  medicineId: string | null,
+  discount: DiscountDraft | null,
+): Cart {
+  return medicineId ? setLineDiscount(cart, medicineId, discount) : { ...cart, discount };
+}
+
+// ─── Cashier discount limit ─────────────────────────────────────────────────
+
+/** The most a cashier's discounts may take off in total: the API's discountCap. */
+export const discountCap = (subtotal: bigint, maxPercent: number) =>
+  percentOf(subtotal, String(maxPercent));
+
+/**
+ * Why the bill's discounts are over a cashier's limit (line and bill
+ * discounts together, as a share of the subtotal), or null when they fit or
+ * there is no limit. Worded as the API words its refusal.
+ */
+export function discountLimitError(totals: CartTotals, maxPercent: number | null): string | null {
+  if (maxPercent === null) return null;
+  const cap = discountCap(totals.subtotal, maxPercent);
+  if (totals.discountTotal <= cap) return null;
+  return `Cashiers can give at most ${maxPercent}% discount (Rs ${paisaToAmount(cap)} on this bill); ask a pharmacist`;
+}
+
+/**
+ * Whether a cashier may set this discount (a line's, or the bill's for a null
+ * medicine id) as it is typed: the whole bill must stay within the limit. A
+ * change that lowers the bill's discount is always allowed, so a bill that is
+ * over the limit (a line was removed after discounting) can be brought down.
+ */
+export function discountAllowed(
+  cart: Cart,
+  medicineId: string | null,
+  discount: DiscountDraft | null,
+  maxPercent: number,
+): boolean {
+  const next = priceCart(withDiscount(cart, medicineId, discount));
+  if (next.discountTotal <= discountCap(next.subtotal, maxPercent)) return true;
+  return next.discountTotal <= priceCart(cart).discountTotal;
+}
+
 /** Prices the cart the way the API's priceSale does. */
 export function priceCart(cart: Cart): CartTotals {
   const lines: PricedLine[] = cart.lines.map((line) => {

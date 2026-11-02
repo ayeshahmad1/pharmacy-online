@@ -1,4 +1,5 @@
 import { validate as isValidCron } from 'node-cron';
+import { MAX_CASHIER_DISCOUNT_PERCENT } from '@pharmacy/shared';
 import { z } from 'zod';
 
 // Load apps/api/.env in development. In production, PM2 starts Node with
@@ -93,8 +94,11 @@ const envSchema = z
       .number()
       .int()
       .min(0)
-      .max(10, 'Cashiers may give at most 10% discount; set 10 or less')
-      .default(10),
+      .max(
+        MAX_CASHIER_DISCOUNT_PERCENT,
+        `Cashiers may give at most ${MAX_CASHIER_DISCOUNT_PERCENT}% discount; set ${MAX_CASHIER_DISCOUNT_PERCENT} or less`,
+      )
+      .default(MAX_CASHIER_DISCOUNT_PERCENT),
     /** Offline sales reaching the server later than this after they were made are refused. */
     OFFLINE_SALE_MAX_AGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
 

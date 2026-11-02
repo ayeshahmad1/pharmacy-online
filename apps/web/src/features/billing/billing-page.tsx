@@ -1,4 +1,9 @@
-import type { PaymentInput, SaleDto, SellableMedicineDto } from '@pharmacy/shared';
+import {
+  MAX_CASHIER_DISCOUNT_PERCENT,
+  type PaymentInput,
+  type SaleDto,
+  type SellableMedicineDto,
+} from '@pharmacy/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CloudOffIcon, OctagonAlertIcon, XIcon } from 'lucide-react';
 import {
@@ -29,6 +34,9 @@ import {
   MAX_CART_LINES,
   addToCart,
   cartUnits,
+  discountAllowed,
+  discountCap,
+  discountLimitError,
   lineGross,
   newCart,
   priceCart,
@@ -42,7 +50,7 @@ import {
 } from './cart';
 import { CartKeysHint, CartList, focusQuantity } from './cart-list';
 import { DaySlipDialog } from './day-slip';
-import { DiscountDialog, type DiscountTarget } from './discount-dialog';
+import { DiscountDialog, type DiscountLimit, type DiscountTarget } from './discount-dialog';
 import { errorBeep } from './feedback';
 import { MedicineSearch } from './medicine-search';
 import { buildOfflineSale, checkOfflineSale } from './offline-sale';
@@ -114,6 +122,15 @@ export function BillingPage() {
   const [draftLoaded, setDraftLoaded] = useState(false);
 
   const totals = useMemo(() => priceCart(cart), [cart]);
+  // Cashiers' discounts are held to the limit as they are typed. The API's
+  // value comes with the medicine list saved on this device; before that,
+  // the most it can ever be.
+  const maxDiscountPercent =
+    user.role === 'CASHIER'
+      ? (offline.catalogue?.cashierMaxDiscountPercent ?? MAX_CASHIER_DISCOUNT_PERCENT)
+      : null;
+  // Only after a line was cut or removed below its discount, or a limit was lowered.
+  const limitError = discountLimitError(totals, maxDiscountPercent);
   const units = cartUnits(cart);
   const selectedLine = cart.lines.find((l) => l.medicine.id === selectedId) ?? null;
 
@@ -410,7 +427,7 @@ export function BillingPage() {
       errorBeep();
       return;
     }
-    if (!totals.valid) {
+    if (!totals.valid || limitError) {
       errorBeep();
       toast.error('Fix the discounts marked in red first');
       return;
@@ -533,6 +550,16 @@ export function BillingPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
+  const discountLimit = ((): DiscountLimit | null => {
+    if (dialog?.type !== 'discount' || maxDiscountPercent === null) return null;
+    const { medicineId } = dialog;
+    return {
+      maxPercent: maxDiscountPercent,
+      cap: discountCap(totals.subtotal, maxDiscountPercent),
+      allows: (discount) => discountAllowed(cart, medicineId, discount, maxDiscountPercent),
+    };
+  })();
+
   const discountTarget = ((): DiscountTarget | null => {
     if (dialog?.type !== 'discount') return null;
     if (dialog.medicineId === null) {
@@ -649,7 +676,7 @@ export function BillingPage() {
           lineCount={cart.lines.length}
           units={units}
           heldCount={held.data?.length ?? 0}
-          billDiscountError={problem?.billDiscount ?? totals.billDiscountError}
+          billDiscountError={problem?.billDiscount ?? totals.billDiscountError ?? limitError}
           customerName={cart.customerName ?? ''}
           onCustomerName={(customerName) => setCart((c) => ({ ...c, customerName }))}
           onCustomerNameDone={focusSearch}
@@ -677,7 +704,7 @@ export function BillingPage() {
         <DiscountDialog
           key={dialog.medicineId ?? 'bill'}
           target={discountTarget}
-          isCashier={user.role === 'CASHIER'}
+          limit={discountLimit}
           onApply={(d) => applyDiscount(dialog.medicineId, d)}
           onClose={() => setDialog(null)}
           onCloseAutoFocus={returnFocus}

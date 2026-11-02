@@ -3,6 +3,12 @@
 
 export const CURRENCY = 'PKR';
 
+/**
+ * The most a cashier's discounts may take off a bill, as a percent of its
+ * subtotal. CASHIER_MAX_DISCOUNT_PERCENT may lower it, never raise it.
+ */
+export const MAX_CASHIER_DISCOUNT_PERCENT = 10;
+
 export const ROLE_CODES = ['ADMIN', 'PHARMACIST', 'CASHIER'] as const;
 export type RoleCode = (typeof ROLE_CODES)[number];
 
