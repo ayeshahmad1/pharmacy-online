@@ -85,8 +85,16 @@ const envSchema = z
     /** Default window for the expiring-soon list, in days. */
     EXPIRY_WARNING_DAYS: z.coerce.number().int().min(1).max(730).default(90),
 
-    /** Largest total discount a cashier may give, as a percent of the bill subtotal. */
-    CASHIER_MAX_DISCOUNT_PERCENT: z.coerce.number().int().min(0).max(100).default(10),
+    /**
+     * Largest total discount a cashier may give, as a percent of the bill
+     * subtotal. It may be lowered but never set above 10%.
+     */
+    CASHIER_MAX_DISCOUNT_PERCENT: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(10, 'Cashiers may give at most 10% discount; set 10 or less')
+      .default(10),
     /** Offline sales reaching the server later than this after they were made are refused. */
     OFFLINE_SALE_MAX_AGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
 

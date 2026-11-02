@@ -34,6 +34,16 @@ describe('parseEnv', () => {
     expect(parseEnv({ ...base, COOKIE_SECURE: 'false' }).COOKIE_SECURE).toBe(false);
   });
 
+  it('never lets the cashier discount cap go above 10%', () => {
+    expect(parseEnv(base).CASHIER_MAX_DISCOUNT_PERCENT).toBe(10);
+    expect(
+      parseEnv({ ...base, CASHIER_MAX_DISCOUNT_PERCENT: '5' }).CASHIER_MAX_DISCOUNT_PERCENT,
+    ).toBe(5);
+    expect(() => parseEnv({ ...base, CASHIER_MAX_DISCOUNT_PERCENT: '11' })).toThrow(
+      /CASHIER_MAX_DISCOUNT_PERCENT/,
+    );
+  });
+
   it('caps token lifetimes', () => {
     expect(() => parseEnv({ ...base, JWT_ACCESS_TTL_SECONDS: '86400' })).toThrow(
       /JWT_ACCESS_TTL_SECONDS/,
