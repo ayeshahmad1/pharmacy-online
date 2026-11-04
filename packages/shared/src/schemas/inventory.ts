@@ -90,6 +90,18 @@ export const writeOffExpiredBodySchema = z.strictObject({
 });
 export type WriteOffExpiredBody = z.infer<typeof writeOffExpiredBodySchema>;
 
+/**
+ * Corrects a batch's expiry date when it was entered wrongly. The new date
+ * applies to every batch of the same lot (medicine + batch number), since one
+ * manufacturer lot has one expiry. It may be in the past (a batch found to be
+ * expired) but not more than 10 years ahead (checked by the API).
+ */
+export const correctBatchExpiryBodySchema = z.strictObject({
+  expiryDate: dateOnlySchema,
+  reason: z.string().trim().min(3, 'Give a reason for the correction').max(500),
+});
+export type CorrectBatchExpiryBody = z.infer<typeof correctBatchExpiryBodySchema>;
+
 const booleanQuerySchema = z
   .enum(['true', 'false'])
   .transform((v) => v === 'true')
@@ -239,6 +251,13 @@ export type StockAdjustmentDto = {
   quantityBefore: number;
   quantityAfter: number;
   batch: BatchStockDto;
+};
+
+export type BatchExpiryCorrectionDto = {
+  /** "YYYY-MM-DD" before the correction. */
+  expiryBefore: string;
+  /** Every batch of the lot, with the new date; the requested batch first. */
+  batches: BatchStockDto[];
 };
 
 export type ExpiredWriteOffDto = {

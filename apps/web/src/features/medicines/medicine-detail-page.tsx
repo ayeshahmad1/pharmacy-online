@@ -4,6 +4,7 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   BoxesIcon,
+  CalendarClockIcon,
   HistoryIcon,
   PackagePlusIcon,
   PencilIcon,
@@ -32,6 +33,7 @@ import {
 import { ActivationDialog, type ActivationTarget } from '@/features/catalog/activation-dialog';
 import { catalogKeys, medicinesApi } from '@/features/catalog/catalog-api';
 import { AdjustStockDialog } from '@/features/inventory/adjust-stock-dialog';
+import { CorrectExpiryDialog } from '@/features/inventory/correct-expiry-dialog';
 import { inventoryApi, inventoryKeys } from '@/features/inventory/inventory-api';
 import { MOVEMENT_LABELS } from '@/features/inventory/movement-labels';
 import { legacyApi, legacyKeys } from '@/features/legacy/legacy-api';
@@ -160,6 +162,7 @@ function MedicineFacts({ medicine: m }: { medicine: MedicineDto }) {
 function StockSection({ medicine }: { medicine: MedicineDto }) {
   const [includeEmpty, setIncludeEmpty] = useState(false);
   const [adjusting, setAdjusting] = useState<BatchStockDto | null>(null);
+  const [correctingExpiry, setCorrectingExpiry] = useState<BatchStockDto | null>(null);
   const stock = useQuery({
     queryKey: inventoryKeys.medicine(medicine.id, includeEmpty),
     queryFn: ({ signal }) => inventoryApi.medicineStock(medicine.id, includeEmpty, signal),
@@ -220,7 +223,7 @@ function StockSection({ medicine }: { medicine: MedicineDto }) {
                     <TableHead className="hidden text-right sm:table-cell">Received</TableHead>
                     <TableHead className="hidden text-right md:table-cell">Cost</TableHead>
                     <TableHead className="hidden lg:table-cell">Supplier</TableHead>
-                    <TableHead className="w-28">
+                    <TableHead className="w-52">
                       <span className="sr-only">Actions</span>
                     </TableHead>
                   </TableRow>
@@ -265,9 +268,18 @@ function StockSection({ medicine }: { medicine: MedicineDto }) {
                           {batch.supplier.name}
                         </TableCell>
                         <TableCell>
-                          <Button variant="outline" size="sm" onClick={() => setAdjusting(batch)}>
-                            <SlidersHorizontalIcon /> Adjust
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setAdjusting(batch)}>
+                              <SlidersHorizontalIcon /> Adjust
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setCorrectingExpiry(batch)}
+                            >
+                              <CalendarClockIcon /> Expiry
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -280,6 +292,9 @@ function StockSection({ medicine }: { medicine: MedicineDto }) {
       )}
 
       {adjusting && <AdjustStockDialog batch={adjusting} onClose={() => setAdjusting(null)} />}
+      {correctingExpiry && (
+        <CorrectExpiryDialog batch={correctingExpiry} onClose={() => setCorrectingExpiry(null)} />
+      )}
     </section>
   );
 }

@@ -1,6 +1,8 @@
 import type {
   AdjustStockBody,
+  BatchExpiryCorrectionDto,
   BatchStockDto,
+  CorrectBatchExpiryBody,
   ExpiredStockQuery,
   ExpiredWriteOffDto,
   ExpiringStockDto,
@@ -328,6 +330,85 @@ export async function adjustStock(
       quantityAfter: after,
       batch: toBatchStockDto(batch, after, today, FULL_VIEW),
     };
+  });
+}
+
+/**
+ * Corrects a wrongly entered expiry date. Stock is untouched; every batch of
+ * the same lot (medicine + batch number) gets the new date, so the lot keeps
+ * one expiry and later receipts of it still match. Each batch is audited.
+ */
+export async function correctBatchExpiry(
+  batchId: string,
+  input: CorrectBatchExpiryBody,
+  actor: Actor,
+): Promise<BatchExpiryCorrectionDto> {
+  const today = businessToday();
+  if (input.expiryDate > addYears(today, MAX_SHELF_LIFE_YEARS)) {
+    throw badRequest(
+      `Expiry date ${input.expiryDate} is more than ${MAX_SHELF_LIFE_YEARS} years away; check for a typo`,
+      { field: 'expiryDate' },
+    );
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const target = await tx.batch.findUnique({
+      where: { id: batchId },
+      select: { medicineId: true, batchNumber: true },
+    });
+    if (!target) throw notFound('Batch not found');
+
+    const lot = await tx.batch.findMany({
+      where: { medicineId: target.medicineId, batchNumber: target.batchNumber },
+      select: { id: true },
+    });
+    // Locked like a sale locks them, so no sale picks these batches by the old date meanwhile.
+    await lockBatches(
+      tx,
+      lot.map((b) => b.id),
+    );
+    const batches = await tx.batch.findMany({
+      where: { id: { in: lot.map((b) => b.id) } },
+      include: batchInclude,
+    });
+    const requested = batches.find((b) => b.id === batchId)!;
+    const expiryBefore = toDateOnly(requested.expiryDate);
+    if (expiryBefore === input.expiryDate) {
+      throw badRequest(`Batch ${requested.batchNumber} already expires on ${input.expiryDate}`, {
+        field: 'expiryDate',
+      });
+    }
+
+    const quantities = await batchQuantities(
+      tx,
+      batches.map((b) => b.id),
+    );
+    const corrected: BatchStockDto[] = [];
+    // The requested batch first, then the rest of the lot in the order received.
+    const ordered = [
+      requested,
+      ...batches
+        .filter((b) => b.id !== batchId)
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
+    ];
+    for (const batch of ordered) {
+      const updated = await tx.batch.update({
+        where: { id: batch.id },
+        data: { expiryDate: fromDateOnly(input.expiryDate) },
+        include: batchInclude,
+      });
+      await writeAudit(tx, {
+        userId: actor.id,
+        action: 'BATCH_EXPIRY_CORRECT',
+        entityType: 'Batch',
+        entityId: batch.id,
+        before: { expiryDate: toDateOnly(batch.expiryDate) },
+        after: { expiryDate: input.expiryDate, reason: input.reason },
+        meta: actor.meta,
+      });
+      corrected.push(toBatchStockDto(updated, quantities.get(batch.id)!, today, FULL_VIEW));
+    }
+    return { expiryBefore, batches: corrected };
   });
 }
 

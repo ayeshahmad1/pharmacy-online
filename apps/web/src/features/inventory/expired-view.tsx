@@ -1,6 +1,10 @@
-import { writeOffExpiredBodySchema, type WriteOffExpiredBody } from '@pharmacy/shared';
+import {
+  writeOffExpiredBodySchema,
+  type BatchStockDto,
+  type WriteOffExpiredBody,
+} from '@pharmacy/shared';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CircleCheckIcon, OctagonAlertIcon, Trash2Icon } from 'lucide-react';
+import { CalendarClockIcon, CircleCheckIcon, OctagonAlertIcon, Trash2Icon } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router';
 import { toast } from 'sonner';
@@ -23,12 +27,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { formatDate, formatQuantity } from '@/lib/format';
 import { parseForm, type FieldErrors } from '@/lib/form';
 import { formatMoney, lineTotal } from '@/lib/money';
+import { CorrectExpiryDialog } from './correct-expiry-dialog';
 import { inventoryApi, inventoryKeys, invalidateStock } from './inventory-api';
 import type { InventoryListParams } from './inventory-page';
 
 /**
  * Expired batches still holding stock. They can never be sold (rule 2); a
  * write-off removes their remaining units with EXPIRED_WRITEOFF movements.
+ * A batch whose date was entered wrongly gets its expiry corrected instead.
  */
 export function ExpiredView({ list: { params, update } }: { list: InventoryListParams }) {
   const queryClient = useQueryClient();
@@ -44,6 +50,7 @@ export function ExpiredView({ list: { params, update } }: { list: InventoryListP
   const [confirming, setConfirming] = useState<'selected' | 'all' | null>(null);
   const [reason, setReason] = useState('');
   const [errors, setErrors] = useState<FieldErrors>({});
+  const [correctingExpiry, setCorrectingExpiry] = useState<BatchStockDto | null>(null);
 
   const pageIds = expired.data?.items.map((b) => b.id) ?? [];
   const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
@@ -93,7 +100,8 @@ export function ExpiredView({ list: { params, update } }: { list: InventoryListP
           <p className="flex-1">
             <strong>{expired.data.total}</strong> expired{' '}
             {expired.data.total === 1 ? 'batch is' : 'batches are'} still on the shelf. Billing will
-            not sell them. Remove them from the shelf, then write them off.
+            not sell them. Remove them from the shelf, then write them off. If a date was entered
+            wrongly, fix it with "Fix date".
           </p>
           <div className="flex gap-2">
             <Button
@@ -114,7 +122,7 @@ export function ExpiredView({ list: { params, update } }: { list: InventoryListP
         query={expired}
         filtered={false}
         onFirstPage={() => update({ page: 1 })}
-        columns={5}
+        columns={6}
         empty={
           <EmptyState
             icon={CircleCheckIcon}
@@ -153,6 +161,9 @@ export function ExpiredView({ list: { params, update } }: { list: InventoryListP
                     <TableHead className="text-right">On shelf</TableHead>
                     <TableHead className="hidden text-right md:table-cell">Cost value</TableHead>
                     <TableHead className="hidden lg:table-cell">Supplier</TableHead>
+                    <TableHead className="w-28">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -194,6 +205,15 @@ export function ExpiredView({ list: { params, update } }: { list: InventoryListP
                         <TableCell className="hidden lg:table-cell">
                           {batch.supplier.name}
                         </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCorrectingExpiry(batch)}
+                          >
+                            <CalendarClockIcon /> Fix date
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -234,6 +254,17 @@ export function ExpiredView({ list: { params, update } }: { list: InventoryListP
           />
         </Field>
       </ConfirmDialog>
+
+      {correctingExpiry && (
+        <CorrectExpiryDialog
+          batch={correctingExpiry}
+          onClose={() => {
+            setCorrectingExpiry(null);
+            // A corrected batch leaves this list; don't write it off by a stale tick.
+            setSelected(new Set());
+          }}
+        />
+      )}
     </div>
   );
 }

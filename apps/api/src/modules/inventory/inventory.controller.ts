@@ -1,5 +1,6 @@
 import type {
   AdjustStockBody,
+  CorrectBatchExpiryBody,
   ExpiredStockQuery,
   ExpiringStockQuery,
   IdParams,
@@ -29,6 +30,15 @@ export const receive: RequestHandler = async (req, res) => {
 export const adjust: RequestHandler = async (req, res) => {
   const adjustment = await service.adjustStock(req.body as AdjustStockBody, actor(req));
   res.status(201).json({ adjustment });
+};
+
+export const correctExpiry: RequestHandler = async (req, res) => {
+  const correction = await service.correctBatchExpiry(
+    params(req).id,
+    req.body as CorrectBatchExpiryBody,
+    actor(req),
+  );
+  res.status(201).json({ correction });
 };
 
 export const writeOffExpired: RequestHandler = async (req, res) => {

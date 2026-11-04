@@ -65,6 +65,11 @@ async function fixtures() {
       body: { batchId: batch.id, quantity: 1, reason: 'Recount' },
     },
     { method: 'post', path: '/api/inventory/write-offs/expired', body: {} },
+    {
+      method: 'post',
+      path: `/api/inventory/batches/${batch.id}/expiry-corrections`,
+      body: { expiryDate: daysFromToday(60), reason: 'Date on the pack' },
+    },
   ];
   return { openReads, managerReads, writes };
 }

@@ -1,5 +1,6 @@
 import {
   adjustStockBodySchema,
+  correctBatchExpiryBodySchema,
   expiredStockQuerySchema,
   expiringStockQuerySchema,
   idParamsSchema,
@@ -82,6 +83,12 @@ inventoryRouter.post(
   manage,
   validate({ body: adjustStockBodySchema }),
   controller.adjust,
+);
+inventoryRouter.post(
+  '/batches/:id/expiry-corrections',
+  manage,
+  validate({ params: idParamsSchema, body: correctBatchExpiryBodySchema }),
+  controller.correctExpiry,
 );
 inventoryRouter.post(
   '/write-offs/expired',

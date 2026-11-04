@@ -67,8 +67,11 @@ behind Nginx in production. Start the API first.
 - **Stock screens (admin, pharmacist):** Medicines (list, create/edit, a detail page with batches in
   FEFO order and stock history), Categories, Suppliers, Inventory (all stock, low stock, expiring
   soon, expired with write-off) and Deliveries (below).
-  Batches are adjusted from the medicine page or the expiring list. Search, filters and page live in
-  the URL, so Back and reload keep them.
+  Batches are adjusted from the medicine page or the expiring list. A wrongly entered expiry date
+  is fixed with **Expiry** on the medicine page or **Fix date** on the expired list
+  (`POST /api/inventory/batches/:id/expiry-corrections`, reason required): stock is untouched, every
+  batch of the same lot gets the new date, and each is audited as `BATCH_EXPIRY_CORRECT`. Search,
+  filters and page live in the URL, so Back and reload keep them.
 - **Forms** validate with the shared Zod schemas through `parseForm` (`src/lib/form.ts`), and API
   field errors are mapped back onto the same fields. Money is typed and sent as strings and only
   formatted or multiplied in exact paisa (`src/lib/money.ts`).

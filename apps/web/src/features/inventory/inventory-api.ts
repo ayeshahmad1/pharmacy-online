@@ -1,6 +1,8 @@
 import type {
   AdjustStockBody,
+  BatchExpiryCorrectionDto,
   BatchStockDto,
+  CorrectBatchExpiryBody,
   ExpiredWriteOffDto,
   ExpiringStockDto,
   ExpiringStockQuery,
@@ -51,6 +53,13 @@ export const inventoryApi = {
     api.get<Paginated<StockMovementDto>>('/inventory/movements', query, signal),
   adjust: async (body: AdjustStockBody) =>
     (await api.post<{ adjustment: StockAdjustmentDto }>('/inventory/adjustments', body)).adjustment,
+  correctExpiry: async (batchId: string, body: CorrectBatchExpiryBody) =>
+    (
+      await api.post<{ correction: BatchExpiryCorrectionDto }>(
+        `/inventory/batches/${batchId}/expiry-corrections`,
+        body,
+      )
+    ).correction,
   writeOffExpired: async (body: WriteOffExpiredBody) =>
     (await api.post<{ writeOff: ExpiredWriteOffDto }>('/inventory/write-offs/expired', body))
       .writeOff,
